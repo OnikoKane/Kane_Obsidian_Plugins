@@ -1,0 +1,10 @@
+{
+  "id": "mubu-style",
+  "name": "MubuStyle",
+  "version": "1.10.6",
+  "minAppVersion": "1.4.0",
+  "description": "把笔记外观改成幕布（Mubu）风格：纸张式背景、实心圆点、缩进参考线与幕布排版。",
+  "author": "ZCode",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

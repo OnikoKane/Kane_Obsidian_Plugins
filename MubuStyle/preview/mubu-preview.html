@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<title>MubuStyle 预览</title>
+		<link rel="stylesheet" href="../styles.css" />
+		<style>
+			@font-face {
+				font-family: "Mubu Sans";
+				font-weight: 400;
+				src: url("../fonts/SourceSansPro-Regular.ttf") format("truetype");
+			}
+			@font-face {
+				font-family: "Mubu Sans";
+				font-weight: 700;
+				src: url("../fonts/SourceSansPro-Bold.ttf") format("truetype");
+			}
+			
+			/* 模拟 Obsidian app.css 里会被插件覆盖的基础变量与结构 */
+			html,
+			body {
+				margin: 0;
+				padding: 0;
+				height: 100%;
+			}
+			.workspace-leaf-content {
+				height: 100%;
+			}
+			.view-content {
+				height: 100%;
+				box-sizing: border-box;
+			}
+			.markdown-preview-view {
+				height: 100%;
+				box-sizing: border-box;
+				padding: 44px 60px;
+			}
+			.markdown-preview-sizer {
+				margin-inline: auto;
+				width: 620px;
+				max-width: 100%;
+			}
+			/* 复刻 app.css 里圆点的定位规则 */
+			.markdown-rendered .list-bullet {
+				float: left;
+				margin-inline-start: -0.8em;
+			}
+			.list-bullet {
+				position: relative;
+				display: inline-flex;
+				justify-content: center;
+				align-items: center;
+			}
+			.list-bullet:before {
+				content: "\200B";
+			}
+			.list-bullet:after {
+				position: absolute;
+				content: "\200B";
+				pointer-events: none;
+				color: var(--list-marker-color);
+				border-radius: 50%;
+				width: var(--list-bullet-size, 0.3em);
+				height: var(--list-bullet-size, 0.3em);
+				border: var(--list-bullet-border, none);
+				background-color: var(--list-marker-color);
+			}
+			.markdown-rendered ul.has-list-bullet {
+				list-style-type: "\200B";
+			}
+			.markdown-rendered ul.has-list-bullet > li::marker {
+				color: transparent;
+			}
+			/* 模拟 Obsidian 的缩进参考线 */
+			.markdown-rendered ul ul {
+				position: relative;
+			}
+			.markdown-rendered ul ul::before {
+				content: "";
+				position: absolute;
+				left: -0.55em;
+				top: 0.2em;
+				bottom: 0.2em;
+				width: 1px;
+				background: var(--indentation-guide-color);
+			}
+		</style>
+	</head>
+	<body
+		class="mubu-style theme-dark mubu-guides mubu-dots mubu-paper mubu-scrollbar mubu-custom-font"
+		style="
+			--mubu-font: 'Mubu Sans', 'Source Sans Pro', 'PingFang SC', 'Hiragino Sans GB';
+			--mubu-font-size: 16px;
+			--mubu-line-height: 2.1;
+			--mubu-desk: #212121;
+			--mubu-chrome: #121212;
+			--mubu-letter-spacing: 0em;
+			--mubu-bg: #2c2c2f;
+			--mubu-bg-secondary: #212121;
+			--mubu-text: #d2d2d0;
+			--mubu-text-muted: #8f8f8f;
+			--mubu-accent: #96b1c6;
+			--mubu-heading: #f2f2f2;
+			--mubu-bullet: #8f8f8f;
+			--mubu-page-inset: 12px;
+			--mubu-page-radius: 6px;
+		"
+	>
+		<div class="workspace-leaf-content" data-type="markdown">
+			<div class="view-content">
+				<div class="markdown-preview-view markdown-rendered">
+					<div class="markdown-preview-sizer">
+						<h1>Obsidian</h1>
+						<ul class="has-list-bullet">
+							<li><div class="list-bullet"></div>Mind</li>
+							<li>
+								<div class="list-bullet"></div>
+								Source
+								<ul class="has-list-bullet">
+									<li>
+										<div class="list-bullet"></div>
+										插件整理
+										<ul class="has-list-bullet">
+											<li>
+												<div class="list-bullet"></div>
+												AdjustableMedia：
+												<a class="internal-link" href="#"
+													>【Obsidian插件】Obsidian里的图片终于能自由排版了 哔哩哔哩</a
+												>
+											</li>
+											<li><div class="list-bullet"></div>快捷栏</li>
+											<li><div class="list-bullet"></div>荧光笔 + 笔记功能</li>
+										</ul>
+									</li>
+									<li>
+										<div class="list-bullet"></div>
+										加速：<a class="internal-link" href="#"
+											>https://obsidian.bijitongbu.site/</a
+										>
+									</li>
+									<li>
+										<div class="list-bullet"></div>
+										官方：<a class="internal-link" href="#"
+											>基本格式语法 - Obsidian 中文帮助</a
+										>
+									</li>
+								</ul>
+							</li>
+							<li><div class="list-bullet"></div>设置</li>
+							<li><div class="list-bullet"></div>LLM控制Obsidian</li>
+						</ul>
+						<p>
+							这是一段正文，用来观察行距、字号与背景色的整体观感。行内代码写作
+							<code>npm run build</code>，高亮写作
+							<mark>重点内容</mark>。
+						</p>
+						<blockquote>引用块使用灰色竖线，与幕布的引用样式一致。</blockquote>
+					</div>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>

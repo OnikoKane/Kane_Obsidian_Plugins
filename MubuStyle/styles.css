@@ -1,0 +1,1643 @@
+/* =====================================================================
+   MubuStyle — 幕布（Mubu）风格排版
+   ---------------------------------------------------------------------
+   所有样式都挂在 body.mubu-style 下，关闭插件即时还原。
+   --mubu-* 令牌由 main.ts 内联写入 body，这里只负责：
+     1) 默认值兜底
+     2) 映射到 Obsidian 的主题变量
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   0. 令牌兜底值（插件未注入时也能显示）
+   --------------------------------------------------------------------- */
+body.mubu-style {
+	/* 字体：拉丁/数字用内置 Source Sans Pro，中文回落到系统字体 */
+	--mubu-font: "Mubu Sans", "Source Sans Pro", "PingFang SC",
+		"Hiragino Sans GB";
+	--mubu-font-size: 16px;
+	--mubu-line-height: 2.1;
+	--mubu-letter-spacing: 0em;
+	/* 三层：外壳（顶栏/标签栏）→ 桌面（侧栏、纸张外的空地）→ 纸张（笔记） */
+	--mubu-chrome: #121212;
+	--mubu-desk: #212121;
+	--mubu-bg: #2c2c2f;
+	--mubu-bg-secondary: #212121;
+	--mubu-text: #d2d2d0;
+	--mubu-text-muted: #8f8f8f;
+	--mubu-accent: #96b1c6;
+	--mubu-ui-accent: #5854d4;
+	--mubu-heading: #f2f2f2;
+	--mubu-bullet: var(--mubu-text-muted);
+	/* 圆点悬停 / 折叠时的圆盘（幕布 6.1.0：hover 浅灰，折叠后更实一点的浅灰） */
+	--mubu-halo: rgba(187, 191, 196, 0.55);
+	--mubu-halo-collapsed: rgba(222, 224, 227, 0.9);
+	/* 纸张留白与圆角 */
+	--mubu-page-inset: 12px;
+	--mubu-page-radius: 4px;
+}
+
+/* 暗色主题（Obsidian 在 body 上挂 theme-dark）：圆盘用 #3f3f43；亮色沿用上面的浅灰 */
+body.theme-dark.mubu-style {
+	--mubu-halo: #3f3f43;
+	--mubu-halo-collapsed: #3f3f43;
+}
+
+/* ---------------------------------------------------------------------
+   1. 把幕布令牌接到 Obsidian 主题变量上
+   --------------------------------------------------------------------- */
+body.mubu-style {
+	/* 字体只在「自定义字体」开启时覆盖，默认沿用 Obsidian 自己的字体与字号 */
+	--line-height: var(--mubu-line-height) !important;
+	--line-height-normal: var(--mubu-line-height) !important;
+	--line-height-tight: calc(var(--mubu-line-height) * 0.82) !important;
+	--p-spacing: 0.5em !important;
+	--heading-spacing: 1.3em !important;
+	--list-spacing: 0em !important;
+	--indent-unit: 0.45em !important;
+
+	/* 窗口外壳：顶栏、标签栏、状态栏、侧栏 */
+	--titlebar-background: var(--mubu-chrome) !important;
+	--titlebar-background-focused: var(--mubu-chrome) !important;
+	--tab-container-background: var(--mubu-chrome) !important;
+	--tab-background-active: var(--mubu-desk) !important;
+	--status-bar-background: var(--mubu-chrome) !important;
+	--status-bar-border-color: transparent !important;
+	--ribbon-background: var(--mubu-desk) !important;
+	--ribbon-background-collapsed: var(--mubu-desk) !important;
+	--tab-text-color: var(--mubu-text-muted) !important;
+	--tab-text-color-active: var(--mubu-text) !important;
+	--tab-text-color-focused: var(--mubu-text-muted) !important;
+	--tab-text-color-focused-active: var(--mubu-text) !important;
+
+	/* 标题：比 Minimal 的 h1 1.125em 大，但整体比上一版收一档 */
+	--h1-size: 1.5em !important;
+	--h2-size: 1.3em !important;
+	--h3-size: 1.15em !important;
+	--h4-size: 1.05em !important;
+	--h5-size: 1em !important;
+	--h6-size: 0.95em !important;
+	--h1-weight: 700 !important;
+	--h2-weight: 700 !important;
+	--h3-weight: 650 !important;
+	--h4-weight: 650 !important;
+	--h5-weight: 600 !important;
+	--h6-weight: 600 !important;
+	--h1-style: normal !important;
+	--h2-style: normal !important;
+	--h3-style: normal !important;
+	--h4-style: normal !important;
+	--h5-style: normal !important;
+	--h6-style: normal !important;
+	--h1-variant: normal !important;
+	--h2-variant: normal !important;
+	--h3-variant: normal !important;
+	--h4-variant: normal !important;
+	--h5-variant: normal !important;
+	--h6-variant: normal !important;
+	--h1-color: var(--mubu-heading) !important;
+	--h2-color: var(--mubu-heading) !important;
+	--h3-color: var(--mubu-heading) !important;
+	--h4-color: var(--mubu-heading) !important;
+	--h5-color: var(--mubu-heading) !important;
+	--h6-color: var(--mubu-heading) !important;
+	--inline-title-size: 1.75em !important;
+	--inline-title-weight: 700 !important;
+	--inline-title-color: var(--mubu-heading) !important;
+	--inline-title-margin-bottom: 0.7em !important;
+	--heading-formatting: color-mix(
+		in srgb,
+		var(--mubu-text-muted) 55%,
+		transparent
+	) !important;
+
+	/* 底色与正文 */
+	--background-primary: var(--mubu-bg) !important;
+	--background-primary-alt: var(--mubu-bg) !important;
+	--text-normal: var(--mubu-text) !important;
+	--text-muted: var(--mubu-text-muted) !important;
+	--text-faint: color-mix(
+		in srgb,
+		var(--mubu-text-muted) 60%,
+		transparent
+	) !important;
+
+	/* 强调色 */
+	--text-accent: var(--mubu-accent) !important;
+	--text-accent-hover: color-mix(
+		in srgb,
+		var(--mubu-accent) 72%,
+		white
+	) !important;
+	--link-color: var(--mubu-accent) !important;
+	--link-color-hover: color-mix(
+		in srgb,
+		var(--mubu-accent) 72%,
+		white
+	) !important;
+	--link-external-color: var(--mubu-accent) !important;
+	--link-external-color-hover: color-mix(
+		in srgb,
+		var(--mubu-accent) 72%,
+		white
+	) !important;
+	--link-unresolved-color: var(--mubu-text-muted) !important;
+	/* UI 强调色（幕布紫）：按钮、开关、复选框、选区 */
+	--interactive-accent: var(--mubu-ui-accent) !important;
+	--interactive-accent-hover: color-mix(
+		in srgb,
+		var(--mubu-ui-accent) 82%,
+		white
+	) !important;
+
+	/* 列表 */
+	--list-marker-color: var(--mubu-bullet) !important;
+	--list-marker-color-hover: var(--mubu-text) !important;
+	--list-marker-color-collapsed: var(--mubu-bullet) !important;
+
+	/* 代码、引用、表格、选区 */
+	--code-background: color-mix(
+		in srgb,
+		var(--mubu-text) 7%,
+		var(--mubu-bg)
+	) !important;
+	--code-normal: var(--mubu-text) !important;
+	--blockquote-color: var(--mubu-text-muted) !important;
+	--blockquote-border-color: color-mix(
+		in srgb,
+		var(--mubu-text) 18%,
+		transparent
+	) !important;
+	--blockquote-border-thickness: 2px !important;
+	--hr-color: color-mix(in srgb, var(--mubu-text) 14%, transparent) !important;
+	--text-selection: color-mix(
+		in srgb,
+		var(--mubu-ui-accent) 30%,
+		transparent
+	) !important;
+	/* 荧光笔底色：写死 rgba，避免 var 链解析失败导致"高亮无效" */
+	--text-highlight-bg: rgba(88, 84, 212, 0.32) !important;
+	--highlight-background: rgba(88, 84, 212, 0.32) !important;
+	--background-modifier-border: color-mix(
+		in srgb,
+		var(--mubu-text) 10%,
+		transparent
+	) !important;
+	--background-modifier-hover: color-mix(
+		in srgb,
+		var(--mubu-text) 6%,
+		transparent
+	) !important;
+	--checkbox-color: var(--mubu-ui-accent) !important;
+	--checkbox-border-color: color-mix(
+		in srgb,
+		var(--mubu-text-muted) 70%,
+		transparent
+	) !important;
+	--tag-background: color-mix(
+		in srgb,
+		var(--mubu-text) 8%,
+		transparent
+	) !important;
+	--tag-color: var(--mubu-text-muted) !important;
+	--indentation-guide-color: color-mix(
+		in srgb,
+		var(--mubu-text) 9%,
+		transparent
+	) !important;
+	--indentation-guide-color-active: color-mix(
+		in srgb,
+		var(--mubu-text) 18%,
+		transparent
+	) !important;
+	--indentation-guide-width: 1px !important;
+}
+
+/* 自定义字体：关闭「跟随 Obsidian 字体」时才生效 */
+body.mubu-style.mubu-custom-font {
+	--font-text: var(--mubu-font) !important;
+	--font-editor: var(--mubu-font) !important;
+	--font-text-size: var(--mubu-font-size) !important;
+	--font-preferred-size: var(--mubu-font-size) !important;
+}
+
+/* 侧栏配色（可关闭，保留主题原样） */
+body.mubu-style:not(.mubu-keep-sidebar) {
+	--background-secondary: var(--mubu-bg-secondary) !important;
+	--background-secondary-alt: var(--mubu-bg-secondary) !important;
+}
+
+/* 幕布静置时不显示缩进竖线 */
+body.mubu-style:not(.mubu-guides) {
+	--indentation-guide-color: transparent !important;
+	--indentation-guide-color-active: transparent !important;
+}
+
+/* ---------------------------------------------------------------------
+   2. 圆点：幕布用的是实心小圆点，阅读视图与实时预览共用 .list-bullet
+   --------------------------------------------------------------------- */
+body.mubu-style.mubu-dots {
+	--list-bullet-size: 0.4em !important;
+	--list-bullet-border: none !important;
+	--list-marker-color: var(--mubu-bullet) !important;
+	--list-marker-color-hover: var(--mubu-text) !important;
+	--list-marker-color-collapsed: var(--mubu-bullet) !important;
+}
+
+/* 幕布的圆点离文字更远一些：默认 0.8em，这里拉到 1.2em */
+body.mubu-style.mubu-dots .markdown-rendered .list-bullet {
+	margin-inline-start: -1.2em;
+}
+
+/* 实时预览：圆点本身留出右间距。
+   空行（预输入状态）时 Obsidian 不渲染 .cm-formatting-list，只剩光点，
+   间距必须挂在 .list-bullet 上，光标才会一开始就离圆点一段距离 */
+body.mubu-style.mubu-dots
+	.markdown-source-view.mod-cm6
+	.HyperMD-list-line
+	.list-bullet {
+	margin-inline-end: 0.5em;
+}
+
+/* ---------------------------------------------------------------------
+   2b. 圆点折叠（幕布 6.1.0：18px 圆盘 + 200ms 过渡，点圆点折叠）
+   圆点本身 6px 左右（0.4em），hover 时用 6px spread 的 box-shadow
+   做出 18px 的半透明圆盘；折叠后圆盘保持浅灰，圆点不变紫。
+   只有开启设置「圆点折叠」时才生效，关闭后完全交回 Obsidian 原生行为。
+   --------------------------------------------------------------------- */
+body.mubu-style.mubu-dots.mubu-bullet-fold .list-bullet {
+	cursor: pointer;
+}
+
+body.mubu-style.mubu-dots.mubu-bullet-fold .list-bullet:after {
+	transition:
+		box-shadow 200ms ease,
+		background-color 200ms ease;
+}
+
+/* 悬停圆点本身 */
+body.mubu-style.mubu-dots.mubu-bullet-fold .list-bullet:hover:after {
+	box-shadow: 0 0 0 6px var(--mubu-halo);
+}
+
+/* JS 兜底：阅读视图里圆点在折叠箭头之前，兄弟选择器够不着，由 MubuBulletFold 加类 */
+body.mubu-style.mubu-dots.mubu-bullet-fold .list-bullet.is-mubu-halo:after {
+	box-shadow: 0 0 0 6px var(--mubu-halo);
+}
+
+/* 悬停原生折叠箭头（实时预览 .cm-fold-indicator / 阅读视图 .list-collapse-indicator） */
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.cm-fold-indicator:hover
+	~ .list-bullet:after,
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.cm-fold-indicator:hover
+	~ .cm-formatting-list
+	.list-bullet:after,
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.list-collapse-indicator:hover
+	~ .list-bullet:after,
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.list-collapse-indicator:hover
+	+ .list-item
+	.list-bullet:after {
+	box-shadow: 0 0 0 6px var(--mubu-halo);
+}
+
+/* 折叠态：圆盘保持浅灰、圆点不变色（不再出现紫色折叠点） */
+body.mubu-style.mubu-dots.mubu-bullet-fold li.is-collapsed .list-bullet:after,
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.cm-line:has(.cm-fold-indicator.is-collapsed)
+	.list-bullet:after,
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.is-collapsed
+	~ .cm-formatting-list
+	.list-bullet:after,
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.cm-fold-indicator.is-collapsed
+	~ .list-bullet:after,
+body.mubu-style.mubu-dots.mubu-bullet-fold
+	.cm-fold-indicator.is-collapsed
+	~ .cm-formatting-list
+	.list-bullet:after {
+	background-color: var(--list-marker-color) !important;
+	box-shadow: 0 0 0 6px var(--mubu-halo-collapsed);
+}
+
+/* ---------------------------------------------------------------------
+   3. 版面：深色桌面 + 一张纸
+   --------------------------------------------------------------------- */
+/* 桌面：笔记区域之外的窗口底色 */
+body.mubu-style
+	.workspace-leaf-content[data-type="markdown"]
+	> .view-content {
+	background-color: var(--mubu-desk);
+}
+
+/* 纸张：笔记本体，四周留白 + 圆角，像贴在桌面上的一张纸 */
+body.mubu-style.mubu-paper
+	.workspace-leaf-content[data-type="markdown"]
+	> .view-content {
+	padding: var(--mubu-page-inset);
+}
+
+body.mubu-style .markdown-source-view,
+body.mubu-style .markdown-reading-view,
+body.mubu-style .markdown-preview-view {
+	background-color: var(--mubu-bg);
+}
+
+body.mubu-style.mubu-paper .markdown-source-view,
+body.mubu-style.mubu-paper .markdown-reading-view {
+	border-radius: var(--mubu-page-radius);
+	overflow: hidden;
+	/* 阅读视图本身是 flex 容器、高度由内容撑开，这里固定成视口高度，
+	   让 .markdown-preview-view 在纸张内部滚动，纸张不跟着滚走 */
+	height: 100%;
+	min-height: 0;
+}
+
+body.mubu-style .markdown-source-view.mod-cm6 .cm-scroller {
+	background-color: transparent;
+}
+
+body.mubu-style .markdown-source-view.mod-cm6 .cm-content,
+body.mubu-style .markdown-rendered,
+body.mubu-style .markdown-preview-view {
+	color: var(--mubu-text);
+	/* 防止主题的 letter-spacing / 可变字宽把中文字形拉扁 */
+	letter-spacing: var(--mubu-letter-spacing);
+	font-stretch: normal;
+	font-kerning: normal;
+	/* 幕布全站都是 grayscale 抗锯齿，字会明显更细一点 */
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+body.mubu-style.mubu-custom-font .markdown-source-view.mod-cm6 .cm-content,
+body.mubu-style.mubu-custom-font .markdown-rendered,
+body.mubu-style.mubu-custom-font .markdown-preview-view {
+	font-family: var(--mubu-font);
+}
+
+body.mubu-style .markdown-source-view.mod-cm6 .cm-scroller,
+body.mubu-style .markdown-rendered,
+body.mubu-style .markdown-preview-view {
+	line-height: var(--mubu-line-height);
+}
+
+body.mubu-style.mubu-custom-font .markdown-source-view.mod-cm6 .cm-scroller,
+body.mubu-style.mubu-custom-font .markdown-rendered,
+body.mubu-style.mubu-custom-font .markdown-preview-view {
+	font-size: var(--mubu-font-size);
+}
+
+/* 实时预览的每一行都撑满一个完整行高。
+   空列表行（还没打字时）内容只有一个零宽的圆点，行盒会塌掉，
+   光标就贴到上一行去了；给 min-height 兜住。
+   标题和代码块有自己的行高，排除掉 */
+body.mubu-style
+	.markdown-source-view.mod-cm6
+	.cm-line:not(.HyperMD-header):not(.HyperMD-codeblock):not(:has(.internal-embed)):not(
+		:has(.image-embed)
+	) {
+	line-height: var(--mubu-line-height) !important;
+	min-height: calc(var(--mubu-font-size) * var(--mubu-line-height));
+}
+
+body.mubu-style .cm-cursor {
+	border-left-color: var(--mubu-ui-accent);
+	border-left-width: 2px;
+}
+
+/* ---------------------------------------------------------------------
+   3b. 窗口外壳：只改颜色变量，不碰标签栏的布局与叠放
+   --------------------------------------------------------------------- */
+body.mubu-style .workspace-ribbon,
+body.mubu-style .workspace-split.mod-left-split,
+body.mubu-style .workspace-split.mod-right-split {
+	background-color: var(--mubu-desk) !important;
+}
+
+body.mubu-style .status-bar {
+	background-color: var(--mubu-chrome) !important;
+	border-top: none;
+	box-shadow: none;
+}
+
+/* ---------------------------------------------------------------------
+   4. 标题
+   --------------------------------------------------------------------- */
+body.mubu-style .markdown-rendered :is(h1, h2, h3, h4, h5, h6),
+body.mubu-style .markdown-preview-view :is(h1, h2, h3, h4, h5, h6) {
+	letter-spacing: 0;
+	border-bottom: none;
+	margin-block-start: 1.3em;
+	margin-block-end: 0.5em;
+}
+
+body.mubu-style
+	.markdown-rendered
+	> :is(h1, h2, h3, h4, h5, h6):first-child {
+	margin-block-start: 0.2em;
+}
+
+body.mubu-style .inline-title {
+	color: var(--mubu-heading);
+	font-weight: 700;
+	letter-spacing: 0;
+}
+
+body.mubu-style .cm-header {
+	color: var(--mubu-heading);
+	font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------
+   5. 段落与列表间距
+   --------------------------------------------------------------------- */
+body.mubu-style .markdown-rendered p {
+	margin-block: var(--p-spacing);
+}
+
+body.mubu-style .markdown-rendered :is(ul, ol) {
+	margin-block: 0.2em;
+	padding-inline-start: 1.8em;
+}
+
+body.mubu-style .markdown-rendered li {
+	margin-block: 0;
+}
+
+body.mubu-style .markdown-rendered li > p {
+	margin-block: 0.1em;
+}
+
+body.mubu-style .markdown-rendered li:first-child,
+body.mubu-style .markdown-rendered li > p:first-child {
+	margin-block-start: 0;
+}
+
+body.mubu-style .markdown-rendered li > :is(ul, ol) {
+	margin-block: 0.12em;
+}
+
+/* ---------------------------------------------------------------------
+   6. 链接
+   --------------------------------------------------------------------- */
+body.mubu-style :is(.markdown-rendered, .markdown-preview-view) a,
+body.mubu-style .cm-underline {
+	color: var(--mubu-accent) !important;
+	text-decoration-line: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 3px;
+	text-decoration-color: color-mix(
+		in srgb,
+		var(--mubu-accent) 45%,
+		transparent
+	);
+}
+
+body.mubu-style :is(.markdown-rendered, .markdown-preview-view) a:hover,
+body.mubu-style .cm-underline:hover {
+	text-decoration-color: currentColor;
+	color: color-mix(in srgb, var(--mubu-accent) 72%, white) !important;
+}
+
+body.mubu-style .internal-link.is-unresolved,
+body.mubu-style .cm-hmd-internal-link.is-unresolved {
+	color: var(--mubu-text-muted) !important;
+	text-decoration-style: dashed;
+}
+
+/* ---------------------------------------------------------------------
+   7. 行内代码与代码块
+   --------------------------------------------------------------------- */
+body.mubu-style :not(pre) > code,
+body.mubu-style .cm-s-obsidian span.cm-inline-code {
+	background-color: color-mix(in srgb, var(--mubu-text) 8%, transparent);
+	color: color-mix(in srgb, var(--mubu-text) 90%, var(--mubu-accent));
+	border-radius: 4px;
+	border: none;
+	padding: 0.1em 0.35em;
+	font-size: 0.9em;
+}
+
+body.mubu-style .markdown-rendered pre {
+	background-color: var(--code-background);
+	border: none;
+	border-radius: 6px;
+	padding: 0.9em 1em;
+}
+
+body.mubu-style .markdown-rendered pre code {
+	background-color: transparent;
+	color: inherit;
+	font-size: 0.9em;
+}
+
+/* ---------------------------------------------------------------------
+   8. 引用、表格、分隔线、图片、标签
+   --------------------------------------------------------------------- */
+body.mubu-style .markdown-rendered blockquote {
+	background-color: transparent;
+	border-inline-start: 2px solid var(--blockquote-border-color);
+	padding-inline-start: 1em;
+	margin-inline: 0;
+	font-style: normal;
+	color: var(--mubu-text-muted);
+}
+
+body.mubu-style .markdown-rendered table {
+	border-collapse: collapse;
+	border: none;
+	background-color: transparent;
+}
+
+body.mubu-style .markdown-rendered th {
+	background-color: transparent;
+	border: none;
+	border-bottom: 1px solid
+		color-mix(in srgb, var(--mubu-text) 18%, transparent);
+	color: var(--mubu-heading);
+	font-weight: 600;
+	text-align: start;
+}
+
+body.mubu-style .markdown-rendered td {
+	border: none;
+	border-bottom: 1px solid
+		color-mix(in srgb, var(--mubu-text) 8%, transparent);
+}
+
+body.mubu-style .markdown-rendered hr {
+	border: none;
+	border-top: 1px solid var(--hr-color);
+	margin-block: 1.8em;
+}
+
+body.mubu-style .markdown-rendered img {
+	border-radius: 4px;
+}
+
+body.mubu-style .markdown-rendered mark {
+	background-color: var(--text-highlight-bg);
+	color: inherit;
+	padding: 0 0.15em;
+	border-radius: 2px;
+}
+
+body.mubu-style .markdown-rendered .tag,
+body.mubu-style :is(.markdown-rendered, .markdown-preview-view) a.tag {
+	background-color: var(--tag-background);
+	color: var(--mubu-text-muted) !important;
+	border: none;
+	border-radius: 3px;
+	padding: 0.05em 0.4em;
+	text-decoration: none !important;
+	font-size: 0.9em;
+}
+
+body.mubu-style .task-list-item-checkbox {
+	border-radius: 4px;
+}
+
+/* 折叠箭头淡一点，鼠标移上去才明显 */
+body.mubu-style .collapse-indicator {
+	color: var(--mubu-text-muted);
+	opacity: 0.5;
+}
+
+body.mubu-style .collapse-indicator:hover {
+	opacity: 1;
+}
+
+/* ---------------------------------------------------------------------
+   9. 滚动条
+   --------------------------------------------------------------------- */
+body.mubu-style.mubu-scrollbar ::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+body.mubu-style.mubu-scrollbar ::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+body.mubu-style.mubu-scrollbar ::-webkit-scrollbar-thumb {
+	background-color: color-mix(
+		in srgb,
+		var(--mubu-text) 14%,
+		transparent
+	);
+	border: 3px solid transparent;
+	background-clip: padding-box;
+	border-radius: 8px;
+}
+
+body.mubu-style.mubu-scrollbar ::-webkit-scrollbar-thumb:hover {
+	background-color: color-mix(
+		in srgb,
+		var(--mubu-text) 24%,
+		transparent
+	);
+}
+
+/* ---------------------------------------------------------------------
+   10. 设置面板里的实时预览块
+   --------------------------------------------------------------------- */
+.mubu-preview {
+	background-color: var(--mubu-bg, #2c2c2f);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 1.1em 1.4em;
+	margin-block: 0.6em 1.4em;
+	font-family: var(--mubu-font);
+	font-size: var(--mubu-font-size, 16px);
+	line-height: var(--mubu-line-height, 1.75);
+	color: var(--mubu-text);
+	max-width: 720px;
+}
+
+.mubu-preview h1 {
+	font-size: 1.7em;
+	font-weight: 700;
+	color: var(--mubu-heading, #efefef);
+	margin-block: 0 0.4em;
+}
+
+.mubu-preview ul {
+	margin-block: 0.2em;
+	padding-inline-start: 1.55em;
+}
+
+.mubu-preview > ul,
+.mubu-preview ul ul {
+	list-style-type: disc;
+}
+
+.mubu-preview li {
+	margin-block: 0.15em;
+}
+
+.mubu-preview li::marker {
+	color: var(--mubu-bullet, #8f8f8f);
+	font-size: 0.72em;
+}
+
+.mubu-preview a {
+	color: var(--mubu-accent, #9db4cd);
+	text-decoration: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 3px;
+}
+
+.mubu-preview p {
+	margin-block: 0.5em;
+}
+
+/* =====================================================================
+   11. 选中浮动工具栏 / 块菜单 / 荧光笔
+   ===================================================================== */
+
+/* ---------- 面板通用外观 ---------- */
+.mubu-tb-menu,
+.mubu-block-menu,
+.mubu-block-menu-sub,
+.mubu-multi-menu,
+.mubu-multi-sub {
+	font-family: var(--font-interface);
+	background-color: #1c1c1e;
+	border-radius: 12px;
+	box-shadow:
+		0 16px 40px rgba(0, 0, 0, 0.48),
+		0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+	color: var(--mubu-text, #d2d2d0);
+}
+
+.mubu-tooltip {
+	font-family: var(--font-interface);
+	background-color: #333338;
+	color: var(--mubu-text, #d2d2d0);
+}
+
+/* ---------- 工具栏 ---------- */
+
+/* Obsidian 自带的 button:not(...) 底色比单类选择器权重高，
+   会把每个图标顶出一块灰方块，这里统一压掉 */
+.mubu-bar button,
+.mubu-color-strip button,
+.mubu-tb-menu button,
+.mubu-multi-menu button,
+.mubu-multi-sub button,
+.mubu-block-menu button,
+.mubu-block-menu-sub button {
+	background-color: transparent !important;
+	background-image: none !important;
+	box-shadow: none !important;
+	border: none !important;
+	text-shadow: none;
+}
+
+.mubu-toolbar {
+	position: fixed;
+	z-index: var(--layer-popover, 50);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 7px;
+	opacity: 0;
+	visibility: hidden;
+	/* 幕布 6.1.0：60ms opacity + scale(0.95 → 1) 入场 */
+	transform: scale(0.95) translateZ(0);
+	transform-origin: center center;
+	transition:
+		opacity 60ms ease-out,
+		transform 60ms ease-out,
+		visibility 60ms;
+}
+
+.mubu-toolbar.is-open {
+	opacity: 1;
+	visibility: visible;
+	transform: scale(1) translateZ(0);
+}
+
+/* 键盘改选区：left/top 走 200ms 滑动（鼠标拖选时瞬间跳位，不加过渡） */
+.mubu-toolbar.is-moving {
+	transition:
+		left 200ms ease,
+		top 200ms ease,
+		opacity 60ms ease-out,
+		transform 60ms ease-out,
+		visibility 60ms;
+}
+
+/* 幕布那种灰底浮条 */
+.mubu-bar,
+.mubu-color-strip {
+	background-color: #49494e;
+	border-radius: 8px;
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.mubu-bar {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 4px 6px;
+	border-radius: 8px;
+}
+
+/* ---------- 顶部文字色条（6 个彩色 A） ---------- */
+.mubu-color-strip {
+	display: flex;
+	align-items: center;
+	gap: 24px;
+	padding: 5px 21px;
+	border-radius: 9px;
+}
+
+.mubu-color-a {
+	width: 18px;
+	height: 26px;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: 18px;
+	font-weight: 600;
+	line-height: 1;
+	cursor: pointer;
+	transition: background-color 120ms ease;
+}
+
+.mubu-color-a:hover {
+	background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* 选区内正在用这个字体颜色时点亮对应的 A */
+.mubu-color-a.is-active {
+	background-color: rgba(255, 255, 255, 0.16) !important;
+}
+
+/* ---------- 横栏按钮 ---------- */
+.mubu-tb-btn {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 1px;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	color: #cdcdd1;
+	cursor: pointer;
+	transition: background-color 120ms ease, color 120ms ease;
+}
+
+.mubu-tb-btn:hover {
+	background-color: rgba(255, 255, 255, 0.12) !important;
+	color: #ffffff;
+}
+
+.mubu-tb-btn:active {
+	background-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+/* 当前格式（加粗/斜体/下划线/删除线/行内代码/高亮/字体颜色/标题） */
+.mubu-tb-btn.is-active {
+	color: #ffffff;
+	background-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+.mubu-tb-btn.is-active:hover {
+	background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* 字体颜色 / 荧光笔下方的色条 */
+.mubu-tb-btn.has-bar::after {
+	content: "";
+	position: absolute;
+	left: 7px;
+	right: 7px;
+	bottom: 5px;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--mubu-bar, #e05a4a);
+}
+
+.mubu-tb-btn > .mubu-dot {
+	position: absolute;
+	top: 6px;
+	right: 7px;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: #e0554a;
+}
+
+.mubu-tb-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.mubu-tb-icon .svg-icon {
+	width: 20px;
+	height: 20px;
+	stroke-width: 1.7;
+}
+
+.mubu-tb-glyph {
+	font-size: 17px;
+	font-weight: 500;
+	line-height: 1;
+}
+
+.mubu-tb-glyph.is-bold {
+	font-size: 20px;
+	font-weight: 700;
+}
+
+.mubu-tb-glyph.is-italic {
+	font-family: Georgia, "Times New Roman", serif;
+	font-size: 21px;
+	font-style: italic;
+}
+
+.mubu-tb-glyph.is-underline {
+	font-size: 18px;
+	text-decoration: underline;
+	text-underline-offset: 4px;
+}
+
+.mubu-tb-glyph.is-strike {
+	font-size: 18px;
+	text-decoration: line-through;
+}
+
+.mubu-tb-glyph.is-bracket {
+	letter-spacing: 1px;
+}
+
+.mubu-tb-glyph.is-bracket::before {
+	content: "[";
+}
+
+.mubu-tb-glyph.is-bracket::after {
+	content: "]";
+}
+
+.mubu-tb-sub {
+	align-self: flex-end;
+	margin-bottom: 4px;
+	font-size: 10px;
+	line-height: 1;
+	opacity: 0.9;
+}
+
+/* 「插入」是一个方括号三点，比常规按钮宽一点，红点放在右括号上方 */
+.mubu-tb-btn[data-id="insert"] {
+	width: 40px;
+}
+
+.mubu-tb-btn[data-id="insert"] > .mubu-dot {
+	top: 6px;
+	right: 6px;
+}
+
+.mubu-tb-sep {
+	width: 1px;
+	height: 18px;
+	margin: 0 3px;
+	background-color: rgba(255, 255, 255, 0.17);
+}
+
+/* ---------- 悬浮提示 ---------- */
+.mubu-tooltip {
+	position: fixed;
+	z-index: calc(var(--layer-popover, 50) + 2);
+	padding: 3px 7px;
+	border-radius: 5px;
+	font-size: 11px;
+	line-height: 1.5;
+	white-space: nowrap;
+	color: color-mix(in srgb, var(--mubu-text, #d2d2d0) 78%, transparent);
+	opacity: 0;
+	pointer-events: none;
+	transform: translateY(2px);
+	transition: opacity 100ms ease, transform 100ms ease;
+}
+
+.mubu-tooltip.is-open {
+	opacity: 1;
+	transform: translateY(0);
+}
+
+/* ---------- 子菜单 ---------- */
+/* 幕布 6.1.0：贴住按钮展开，100ms 位移 + 淡入；上方展开从下方 6px 处滑上来 */
+.mubu-tb-menu {
+	position: fixed;
+	z-index: calc(var(--layer-popover, 50) + 1);
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding: 5px;
+	min-width: 190px;
+	opacity: 0;
+	transform: translateY(-3px) scale(0.985);
+	transition:
+		opacity 100ms ease,
+		transform 100ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.mubu-tb-menu.is-above:not(.is-open) {
+	transform: translateY(6px) scale(0.985);
+	transform-origin: bottom center;
+}
+
+.mubu-tb-menu.is-below:not(.is-open) {
+	transform: translateY(-6px) scale(0.985);
+	transform-origin: top center;
+}
+
+.mubu-tb-menu.is-open {
+	opacity: 1;
+	transform: translateY(0) scale(1);
+}
+
+/* 工具栏「更多」菜单：幕布是 160ms 缩放+淡入（其它悬停子菜单 100ms） */
+.mubu-tb-menu.is-more {
+	transition:
+		opacity 160ms ease,
+		transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.mubu-tb-menu-sep {
+	height: 1px;
+	margin: 4px 6px;
+	background-color: rgba(255, 255, 255, 0.08);
+}
+
+.mubu-tb-menu.is-swatches {
+	flex-direction: row;
+	flex-wrap: nowrap;
+	justify-content: center;
+	gap: 4px;
+	width: 250px;
+	max-width: 250px;
+	padding: 5px;
+}
+
+.mubu-tb-menu-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 30px;
+	padding: 0 8px;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	color: #d6d6d9;
+	font-size: 13px;
+	text-align: start;
+	cursor: pointer;
+	transition: background-color 120ms ease, color 120ms ease;
+}
+
+.mubu-tb-menu-item:hover {
+	background-color: rgba(255, 255, 255, 0.09) !important;
+}
+
+.mubu-tb-menu-item.is-danger {
+	color: #e07a7a;
+}
+
+.mubu-tb-menu-item.is-danger .svg-icon {
+	color: #e07a7a;
+}
+
+.mubu-tb-menu-item.is-danger:hover {
+	background-color: color-mix(in srgb, #d97b7b 22%, transparent);
+	color: #f0c0c0;
+}
+
+.mubu-tb-menu-label {
+	flex: 1;
+}
+
+.mubu-tb-menu-hint {
+	font-size: 11px;
+	color: color-mix(in srgb, var(--mubu-text, #d2d2d0) 45%, transparent);
+}
+
+/* 荧光笔色块：幕布 6.1.0 是 hover scale(1.2) + 200ms */
+.mubu-swatch {
+	width: 18px;
+	height: 18px;
+	border-radius: 5px;
+	box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+	transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.mubu-tb-menu-item:hover .mubu-swatch {
+	transform: scale(1.2);
+	box-shadow:
+		0 0 0 1.5px rgba(255, 255, 255, 0.55) inset,
+		0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* 行首块菜单里的色板按钮同样放大到 1.2 */
+.mubu-block-menu .mubu-tb-btn:hover .mubu-swatch {
+	transform: scale(1.2);
+}
+
+.mubu-swatch.is-none {
+	background:
+		linear-gradient(
+			135deg,
+			transparent 45%,
+			color-mix(in srgb, var(--mubu-text, #d2d2d0) 45%, transparent) 45%,
+			color-mix(in srgb, var(--mubu-text, #d2d2d0) 45%, transparent) 55%,
+			transparent 55%
+		),
+		#2a2a2e;
+}
+
+.mubu-tb-menu.is-swatches .mubu-tb-menu-item {
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	justify-content: center;
+}
+
+/* 字体颜色：彩色 A（幕布的做法），比色块更紧凑 */
+.mubu-menu-a {
+	font-size: 18px;
+	font-weight: 600;
+	line-height: 1;
+	text-align: center;
+}
+
+/* ---------- 多选竖排菜单（对齐幕布） ---------- */
+.mubu-multi-menu {
+	position: fixed;
+	z-index: calc(var(--layer-popover, 50) + 1);
+	width: 236px;
+	padding: 8px 0 0;
+	opacity: 0;
+	visibility: hidden;
+	transform: translateY(-4px) scale(0.985);
+	transition:
+		opacity 130ms ease,
+		transform 130ms cubic-bezier(0.2, 0.8, 0.2, 1),
+		visibility 130ms;
+}
+
+.mubu-multi-menu.is-open {
+	opacity: 1;
+	visibility: visible;
+	transform: translateY(0) scale(1);
+}
+
+/* 键盘改选区时同样滑过去，鼠标操作瞬间跳位 */
+.mubu-multi-menu.is-moving {
+	transition:
+		left 200ms ease,
+		top 200ms ease,
+		opacity 130ms ease,
+		transform 130ms cubic-bezier(0.2, 0.8, 0.2, 1),
+		visibility 130ms;
+}
+
+.mubu-multi-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-around;
+	padding: 2px 8px 4px;
+}
+
+.mubu-multi-h {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 1px;
+	width: 46px;
+	height: 34px;
+	padding: 0;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	color: #cfcfd2;
+	cursor: pointer;
+	transition: background-color 120ms ease, color 120ms ease;
+}
+
+.mubu-multi-h:hover {
+	background-color: rgba(255, 255, 255, 0.08) !important;
+	color: #ffffff;
+}
+
+.mubu-multi-h .mubu-tb-glyph {
+	font-size: 16px;
+}
+
+.mubu-multi-h.is-active {
+	color: var(--mubu-ui-accent, #5854d4);
+}
+
+.mubu-multi-fmts {
+	padding-bottom: 8px;
+}
+
+.mubu-multi-sep {
+	height: 1px;
+	margin: 2px 0;
+	background-color: rgba(255, 255, 255, 0.07);
+}
+
+.mubu-multi-item {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 13px;
+	width: 100%;
+	height: 37px;
+	padding: 0 16px;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	color: #d2d2d4;
+	font-size: 14px;
+	text-align: start;
+	cursor: pointer;
+	transition: background-color 120ms ease;
+}
+
+.mubu-multi-item:hover {
+	background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.mubu-multi-item.is-danger,
+.mubu-multi-item.is-danger .svg-icon {
+	color: #d24a4a;
+}
+
+.mubu-multi-item .mubu-tb-icon .svg-icon {
+	width: 17px;
+	height: 17px;
+}
+
+.mubu-multi-glyph {
+	width: 17px;
+	font-size: 15px;
+	text-align: center;
+}
+
+.mubu-multi-item.has-bar .mubu-multi-glyph {
+	padding-bottom: 1px;
+	border-bottom: 2px solid var(--mubu-bar, #e05a4a);
+}
+
+.mubu-multi-label {
+	flex: 1;
+}
+
+.mubu-multi-chevron {
+	font-size: 15px;
+	opacity: 0.45;
+}
+
+.mubu-multi-footer {
+	padding: 9px 16px 11px;
+	border-top: 1px solid rgba(255, 255, 255, 0.07);
+	font-size: 11.5px;
+	color: rgba(255, 255, 255, 0.36);
+}
+
+/* 多选菜单里的二级菜单，从行右侧弹出 */
+.mubu-multi-sub {
+	position: fixed;
+	z-index: calc(var(--layer-popover, 50) + 2);
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 150px;
+	padding: 5px;
+	opacity: 0;
+	transform: translateX(-4px) scale(0.98);
+	transition:
+		opacity 120ms ease,
+		transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.mubu-multi-sub.is-open {
+	opacity: 1;
+	transform: translateX(0) scale(1);
+}
+
+.mubu-multi-sub.is-swatches {
+	flex-direction: row;
+	flex-wrap: wrap;
+	gap: 4px;
+	min-width: 0;
+	max-width: 232px;
+	padding: 7px;
+}
+
+.mubu-multi-sub.is-swatches .mubu-tb-menu-item {
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	justify-content: center;
+}
+
+/* ---------- 行首「⋯」 ---------- */
+/* 把手出现（display: none → flex 会让动画重新开始）时 120ms 淡入 */
+@keyframes mubu-handle-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 0.75;
+	}
+}
+
+.mubu-block-handle {
+	position: fixed;
+	z-index: var(--layer-popover, 50);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--mubu-text, #d2d2d0) 8%, transparent);
+	background: transparent;
+	color: color-mix(in srgb, var(--mubu-text, #d2d2d0) 55%, transparent);
+	cursor: pointer;
+	opacity: 0.75;
+	animation: mubu-handle-in 120ms ease;
+	/* 把手出现/消失 120ms，hover 背景 200ms（幕布 6.1.0） */
+	transition:
+		opacity 120ms ease,
+		background-color 200ms ease,
+		color 200ms ease;
+}
+
+.mubu-block-handle:hover {
+	opacity: 1;
+	background-color: color-mix(in srgb, var(--mubu-text, #d2d2d0) 10%, transparent);
+	color: var(--mubu-text, #d2d2d0);
+}
+
+/* ---------- 块菜单 ---------- */
+.mubu-block-menu {
+	position: fixed;
+	z-index: calc(var(--layer-popover, 50) + 1);
+	width: 210px;
+	padding: 5px;
+	opacity: 0;
+	/* 160ms 缩放 + 淡入，transform-origin 靠把手一侧 */
+	transform: scale(0.96);
+	transform-origin: top left;
+	transition:
+		opacity 160ms ease,
+		transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.mubu-block-menu.is-open {
+	opacity: 1;
+	transform: scale(1);
+}
+
+/* 「添加图标」的 emoji 二级菜单：120ms translateX(-6px) + scale(.98) → 0 */
+.mubu-block-menu-sub {
+	position: fixed;
+	z-index: calc(var(--layer-popover, 50) + 2);
+	display: grid;
+	grid-template-columns: repeat(6, 1fr);
+	gap: 2px;
+	padding: 7px;
+	opacity: 0;
+	transform: translateX(-6px) scale(0.98);
+	transform-origin: left center;
+	transition:
+		opacity 120ms ease,
+		transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.mubu-block-menu-sub.is-open {
+	opacity: 1;
+	transform: translateX(0) scale(1);
+}
+
+/* ---------- 表情选择器（工具栏「表情」/ 块菜单「添加图标」共用） ---------- */
+.mubu-tb-menu.is-emoji,
+.mubu-block-menu-sub.is-emoji {
+	display: block;
+	width: 268px;
+	max-height: 300px;
+	overflow: hidden;
+	padding: 5px;
+}
+
+.mubu-emoji-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	width: 100%;
+}
+
+.mubu-emoji-search-row {
+	display: flex;
+	gap: 4px;
+}
+
+.mubu-emoji-search {
+	flex: 1;
+	min-width: 0;
+	height: 26px;
+	padding: 0 7px;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 5px;
+	background: rgba(255, 255, 255, 0.06);
+	color: #dedee2;
+	font-size: 12px;
+}
+
+.mubu-emoji-search:focus {
+	border-color: var(--mubu-ui-accent, #5854d4);
+	outline: none;
+}
+
+.mubu-emoji-random {
+	height: 26px;
+	padding: 0 8px;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 5px;
+	background: rgba(255, 255, 255, 0.06);
+	color: #dedee2;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.mubu-emoji-random:hover {
+	background: rgba(255, 255, 255, 0.12) !important;
+}
+
+.mubu-emoji-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	max-height: 230px;
+	overflow-y: scroll;
+	overscroll-behavior: contain;
+	padding-right: 2px;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.mubu-emoji-body::-webkit-scrollbar {
+	width: 5px;
+}
+
+.mubu-emoji-body::-webkit-scrollbar-thumb {
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.22);
+}
+
+.mubu-emoji-section-title {
+	margin: 4px 2px 2px;
+	font-size: 10.5px;
+	color: rgba(255, 255, 255, 0.4);
+	letter-spacing: 0.02em;
+}
+
+.mubu-emoji-grid {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 2px;
+}
+
+.mubu-emoji-cell {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 30px;
+	padding: 0;
+	border: none;
+	border-radius: 5px;
+	background: transparent;
+	font-size: 19px;
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		background-color 100ms ease,
+		transform 100ms ease;
+}
+
+.mubu-emoji-cell:hover {
+	background-color: rgba(255, 255, 255, 0.12) !important;
+	transform: scale(1.08);
+}
+
+.mubu-emoji-empty {
+	padding: 10px 4px;
+	font-size: 12px;
+	color: rgba(255, 255, 255, 0.4);
+}
+
+.mubu-block-menu-row {
+	display: flex;
+	gap: 2px;
+	padding: 2px 0;
+}
+
+.mubu-block-menu-row .mubu-tb-btn {
+	flex: 1;
+	height: 30px;
+}
+
+.mubu-block-menu-row.is-swatches {
+	gap: 3px;
+	padding: 3px 0;
+}
+
+.mubu-block-menu-row.is-swatches .mubu-tb-btn {
+	width: 22px;
+	height: 22px;
+}
+
+.mubu-block-menu-row.is-swatches .mubu-swatch {
+	width: 16px;
+	height: 16px;
+	border-radius: 4px;
+}
+
+.mubu-block-menu-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	margin-top: 3px;
+	padding-top: 4px;
+	border-top: 1px solid color-mix(in srgb, var(--mubu-text, #d2d2d0) 9%, transparent);
+}
+
+.mubu-block-menu-list .mubu-tb-menu-item {
+	height: 30px;
+	padding: 0 7px;
+	gap: 8px;
+	border-radius: 6px;
+	font-size: 13px;
+}
+
+.mubu-block-menu-list .mubu-tb-icon .svg-icon {
+	width: 17px;
+	height: 17px;
+}
+
+.mubu-block-menu-footer {
+	margin-top: 3px;
+	padding: 4px 7px 1px;
+	border-top: 1px solid color-mix(in srgb, var(--mubu-text, #d2d2d0) 9%, transparent);
+	font-size: 10.5px;
+	color: color-mix(in srgb, var(--mubu-text, #d2d2d0) 45%, transparent);
+}
+
+/* ---------- 荧光笔：低饱和底 + 不改变文字颜色，保证可读 ---------- */
+body.mubu-style mark.mubu-hl,
+body.mubu-style .markdown-rendered mark.mubu-hl {
+	border-radius: 3px;
+	padding: 0.02em 0.12em;
+	color: inherit;
+	background-color: var(--hl-bg);
+	box-decoration-break: clone;
+	-webkit-box-decoration-break: clone;
+}
+
+/* 原生 == 高亮（实时预览是 span.cm-highlight）
+   注意：不要在这里带上 .markdown-rendered mark，否则会把彩色高亮的
+   <mark class="mubu-hl-*"> 一起盖成紫色 */
+body.mubu-style .cm-s-obsidian span.cm-highlight,
+body.mubu-style .markdown-source-view.mod-cm6 .cm-highlight {
+	background-color: rgba(88, 84, 212, 0.32) !important;
+	color: inherit;
+	border-radius: 3px;
+	padding: 0.02em 0.12em;
+	box-decoration-break: clone;
+	-webkit-box-decoration-break: clone;
+}
+
+/* 内联 <mark> 没带 class（或被消毒器丢了 class）时的兜底，排除彩色高亮 */
+body.mubu-style .markdown-source-view.mod-cm6 .cm-line mark:not(.mubu-hl),
+body.mubu-style .markdown-rendered mark:not(.mubu-hl) {
+	background-color: rgba(88, 84, 212, 0.32);
+	color: inherit;
+	border-radius: 3px;
+	padding: 0.02em 0.12em;
+}
+
+body.mubu-style mark.mubu-hl-amber {
+	--hl: #d9a94b;
+	--hl-bg: #d9a94b42;
+}
+body.mubu-style mark.mubu-hl-rose {
+	--hl: #d97b7b;
+	--hl-bg: #d97b7b42;
+}
+body.mubu-style mark.mubu-hl-gray {
+	--hl: #9a9a9a;
+	--hl-bg: #9a9a9a42;
+}
+body.mubu-style mark.mubu-hl-green {
+	--hl: #7fb069;
+	--hl-bg: #7fb06942;
+}
+body.mubu-style mark.mubu-hl-blue {
+	--hl: #6aa9d8;
+	--hl-bg: #6aa9d842;
+}
+body.mubu-style mark.mubu-hl-purple {
+	--hl: #a07bc8;
+	--hl-bg: #a07bc842;
+}
+body.mubu-style mark.mubu-hl-teal {
+	--hl: #5fb3ad;
+	--hl-bg: #5fb3ad42;
+}
+
+/* ---------- 字体颜色：<span class="mubu-fg-*"> ---------- */
+body.mubu-style .cm-content .mubu-fg-rose,
+body.mubu-style .markdown-rendered .mubu-fg-rose {
+	color: #e05a4a !important;
+}
+body.mubu-style .cm-content .mubu-fg-amber,
+body.mubu-style .markdown-rendered .mubu-fg-amber {
+	color: #e0a458 !important;
+}
+body.mubu-style .cm-content .mubu-fg-green,
+body.mubu-style .markdown-rendered .mubu-fg-green {
+	color: #70c060 !important;
+}
+body.mubu-style .cm-content .mubu-fg-blue,
+body.mubu-style .markdown-rendered .mubu-fg-blue {
+	color: #60a0e0 !important;
+}
+body.mubu-style .cm-content .mubu-fg-purple,
+body.mubu-style .markdown-rendered .mubu-fg-purple {
+	color: #6f7bd6 !important;
+}
+body.mubu-style .cm-content .mubu-fg-gray,
+body.mubu-style .markdown-rendered .mubu-fg-gray {
+	color: #d5d5d8 !important;
+}
