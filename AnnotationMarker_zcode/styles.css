@@ -1,0 +1,2009 @@
+/* 弹出标注菜单时，原选区的临时高亮（CSS Custom Highlight API，配合 selectionHighlight.ts） */
+::highlight(annotation-selection-active) {
+  background-color: var(--text-selection);
+}
+
+.annotation-highlight {
+  border-radius: 2px;
+  padding: 0 2px;
+  transition: all 0.15s ease;
+}
+
+@media (hover: hover) {
+  .annotation-highlight:hover {
+    filter: brightness(0.9);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+}
+
+.annotation-card-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 260px;
+  /* 小屏保险：菜单宽度不超过视口减两侧留白（SelectionMenu/AnnotationMenu 共用） */
+  max-width: min(340px, calc(100vw - 20px));
+  max-height: 70vh;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.1);
+  padding: 0;
+  font-size: 14px;
+  animation: annotation-menu-fade-in 0.15s ease-out;
+  display: flex;
+  flex-direction: column;
+}
+
+.annotation-menu-scrollable-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0;
+}
+
+.annotation-menu-scrollable-content > div {
+  margin: 0;
+}
+
+@keyframes annotation-menu-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.annotation-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  border-radius: 8px 8px 0 0;
+}
+
+/* 添加标注菜单的标题栏作为拖动手柄：cursor 提示可拖，
+   touch-action: none 让触摸拖动不被页面滚动接管，拖动时不选中标题文字 */
+.annotation-selection-menu .annotation-menu-header {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.annotation-menu-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.annotation-menu-close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+@media (hover: hover) {
+  .annotation-menu-close:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.annotation-menu-preview {
+  padding: 10px 14px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-menu-preview span {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.annotation-menu-text {
+  padding: 10px 14px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-menu-text span {
+  color: var(--text-normal);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.annotation-menu-note {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-menu-note label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.annotation-note-text {
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.annotation-menu-section {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-menu-section label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.annotation-color-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 双写类名抬高特异性（0,2,0）：移动端 app/主题会给 button 注入 padding（触控目标尺寸），
+   border-box 下 padding 会把 28px 圆点撑成椭圆。
+   padding 必须用 !important：3.0.17 曾试验纯特异性方案（双写类名 0,2,0），桌面
+   dev:mobile 模拟探针通过，但真机 iPad 回归证实宿主规则强于该特异性（或为内联注入），
+   模拟环境不足以代表真机 CSS——!important 是真机验证过的唯一可靠手段，
+   CSS lint 的 Avoid !important Warning 已知并刻意接受 */
+.annotation-color-dot.annotation-color-dot {
+  width: 28px;
+  height: 28px;
+  /* 防御宿主主题：移动端主题常为触控目标加大 button 的 min-height/padding，
+     一旦覆盖某一维尺寸就会把圆形撑成椭圆；显式锁定两维并加 aspect-ratio 兜底，
+     appearance:none 剥离原生按钮内建样式 */
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  aspect-ratio: 1 / 1;
+  min-width: 28px;
+  min-height: 28px;
+  max-width: 28px;
+  max-height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0 !important;
+  /* 颜色较多换行时不被压缩变形 */
+  flex: 0 0 auto;
+}
+
+@media (hover: hover) {
+  .annotation-color-dot:hover {
+    transform: scale(1.1);
+  }
+}
+
+.annotation-color-dot.active {
+  border-color: var(--text-normal);
+  box-shadow: 0 0 0 2px var(--background-primary);
+}
+
+.annotation-color-dot.ac-1 {
+  background: var(--annotation-dot-color1, #ff6b6b);
+}
+
+.annotation-color-dot.ac-2 {
+  background: var(--annotation-dot-color2, #54a0ff);
+}
+
+.annotation-color-dot.ac-3 {
+  background: var(--annotation-dot-color3, #ffd43b);
+}
+
+.annotation-color-dot.ac-4 {
+  background: var(--annotation-dot-color4, #26c281);
+}
+
+.annotation-color-dot.ac-5 {
+  background: var(--annotation-dot-color5, #9b59b6);
+}
+
+.annotation-color-dot.ac-6 {
+  background: var(--annotation-dot-color6, #ff9f43);
+}
+
+.annotation-color-dot.ac-7 {
+  background: var(--annotation-dot-color7, #00d2d3);
+}
+
+.annotation-color-dot.ac-8 {
+  background: var(--annotation-dot-color8, #f368e0);
+}
+
+.annotation-color-dot.ac-9 {
+  background: var(--annotation-dot-color9, #8395a7);
+}
+
+.annotation-color-dot.ac-10 {
+  background: var(--annotation-dot-color10, #7f8c3f);
+}
+
+.annotation-color-dot.ac-none {
+  background: transparent;
+  border: 2px dashed var(--text-muted);
+  position: relative;
+}
+
+.annotation-menu-actions {
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.annotation-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+  flex: 1;
+  min-width: 70px;
+}
+
+.annotation-btn-primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+@media (hover: hover) {
+  .annotation-btn-primary:hover {
+    background: var(--interactive-accent-hover);
+  }
+}
+
+.annotation-btn-secondary {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+@media (hover: hover) {
+  .annotation-btn-secondary:hover {
+    background: var(--background-modifier-border);
+  }
+}
+
+.annotation-btn-danger {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
+}
+
+@media (hover: hover) {
+  .annotation-btn-danger:hover {
+    background: rgba(255, 107, 107, 0.25);
+  }
+}
+
+.annotation-note-modal {
+  padding: 16px;
+  max-width: 480px;
+}
+
+.annotation-note-modal h3 {
+  margin-bottom: 16px;
+  color: var(--text-normal);
+  font-size: 18px;
+}
+
+.annotation-modal-preview {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+.annotation-modal-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.annotation-modal-preview strong {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.annotation-modal-preview-text {
+  color: var(--text-normal);
+  font-size: 13px;
+  word-break: break-word;
+  user-select: text;
+  cursor: text;
+  white-space: pre-wrap;
+}
+
+.annotation-copy-btn {
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+@media (hover: hover) {
+  .annotation-copy-btn:hover {
+    background: var(--background-modifier-active-hover);
+    color: var(--text-normal);
+  }
+}
+
+.annotation-color-picker {
+  margin-bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.annotation-color-picker label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.annotation-note-container {
+  margin-bottom: 16px;
+}
+
+.annotation-note-container label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.annotation-note-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  min-height: 100px;
+  box-sizing: border-box;
+}
+
+.annotation-note-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.annotation-char-count {
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.annotation-char-count-error {
+  color: #ff6b6b;
+}
+
+.annotation-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.annotation-modal-buttons .annotation-btn {
+  min-width: 80px;
+}
+
+.annotation-note-input-small {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 60px;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.annotation-note-input-small:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.annotation-btn-small {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.annotation-action-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  flex-shrink: 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.annotation-action-row .annotation-btn {
+  flex: 1;
+}
+
+.annotation-note-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.annotation-note-label-row label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.annotation-highlight-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 300px;
+  padding: 10px 12px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease-out;
+}
+
+.annotation-highlight-tooltip.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.annotation-highlight-tooltip::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: var(--arrow-left, calc(50% - 5px));
+  width: 10px;
+  height: 10px;
+  background: var(--background-primary);
+  border-left: 1px solid var(--background-modifier-border);
+  border-top: 1px solid var(--background-modifier-border);
+  transform: rotate(45deg);
+}
+
+.annotation-highlight-tooltip.tooltip-bottom::before {
+  top: auto;
+  bottom: -6px;
+  border-top: none;
+  border-left: none;
+  border-right: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  transform: rotate(45deg);
+}
+
+.annotation-tooltip-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.annotation-tooltip-content {
+  color: var(--text-normal);
+}
+
+@keyframes annotation-tooltip-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.annotation-list-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  z-index: 100;
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+@media (hover: hover) {
+  .annotation-list-btn:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.annotation-list-btn.dragging {
+  cursor: grabbing;
+  opacity: 0.8;
+  transition: none;
+}
+
+.annotation-list-btn span {
+  font-size: 18px;
+}
+
+.annotation-list-panel {
+  width: 300px;
+  max-height: 50vh;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.annotation-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  border-radius: 8px 8px 0 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.annotation-list-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.annotation-list-close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (hover: hover) {
+  .annotation-list-close:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.annotation-list-content {
+  max-height: calc(60vh - 50px);
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.annotation-list-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 24px;
+  font-size: 14px;
+}
+
+.annotation-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+@media (hover: hover) {
+  .annotation-list-item:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.annotation-list-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.annotation-list-dot.ac-1 {
+  background: var(--annotation-dot-color1, #ff6b6b);
+}
+
+.annotation-list-dot.ac-2 {
+  background: var(--annotation-dot-color2, #54a0ff);
+}
+
+.annotation-list-dot.ac-3 {
+  background: var(--annotation-dot-color3, #ffd43b);
+}
+
+.annotation-list-dot.ac-4 {
+  background: var(--annotation-dot-color4, #26c281);
+}
+
+.annotation-list-dot.ac-5 {
+  background: var(--annotation-dot-color5, #9b59b6);
+}
+
+.annotation-list-dot.ac-6 {
+  background: var(--annotation-dot-color6, #ff9f43);
+}
+
+.annotation-list-dot.ac-7 {
+  background: var(--annotation-dot-color7, #00d2d3);
+}
+
+.annotation-list-dot.ac-8 {
+  background: var(--annotation-dot-color8, #f368e0);
+}
+
+.annotation-list-dot.ac-9 {
+  background: var(--annotation-dot-color9, #8395a7);
+}
+
+.annotation-list-dot.ac-10 {
+  background: var(--annotation-dot-color10, #7f8c3f);
+}
+
+.annotation-list-dot.ac-none {
+  background: transparent;
+  border: 2px dashed var(--text-muted);
+}
+
+.annotation-list-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.annotation-list-note {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.annotation-list-sort-container {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.annotation-list-sort-select {
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 160px;
+}
+
+@media (hover: hover) {
+  .annotation-list-sort-select:hover {
+    border-color: var(--interactive-accent);
+  }
+}
+
+.annotation-list-sort-select:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.annotation-context-menu {
+  position: fixed;
+  z-index: 10001;
+  min-width: 120px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  animation: annotation-menu-fade-in 0.15s ease-out;
+}
+
+.annotation-context-menu-item {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+@media (hover: hover) {
+  .annotation-context-menu-item:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.annotation-context-menu-danger {
+  color: #ff6b6b;
+}
+
+@media (hover: hover) {
+  .annotation-context-menu-danger:hover {
+    background: rgba(255, 107, 107, 0.1);
+  }
+}
+
+.annotation-ruby-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.annotation-ruby-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.annotation-ruby-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
+}
+
+.annotation-ruby-row label {
+  font-size: 13px;
+  color: var(--text-normal);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.annotation-ruby-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.annotation-ruby-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annotation-ruby-preview label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.annotation-ruby-text-preview {
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: text;
+  cursor: text;
+}
+
+.annotation-ruby-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annotation-ruby-input-row label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.annotation-ruby-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.annotation-ruby-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.annotation-ruby-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annotation-ruby-list-container label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.annotation-ruby-list {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.annotation-ruby-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px 0;
+  font-style: italic;
+}
+
+.annotation-ruby-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+}
+
+.annotation-ruby-item-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
+.annotation-ruby-item-delete {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+@media (hover: hover) {
+  .annotation-ruby-item-delete:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+/* ========== 标注视图样式 ========== */
+
+/* 标注视图中的 <mark> 标签基础样式 */
+.markdown-rendered mark[data-annotation-id],
+.markdown-preview-view mark[data-annotation-id] {
+  color: inherit;
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 0 2px;
+  transition: box-shadow 0.15s ease;
+}
+
+@media (hover: hover) {
+  .markdown-rendered mark[data-annotation-id]:hover, .markdown-preview-view mark[data-annotation-id]:hover {
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    outline: 1px solid rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* 嵌套标注的视觉反馈 */
+.markdown-rendered mark[data-annotation-id] mark[data-annotation-id],
+.markdown-preview-view mark[data-annotation-id] mark[data-annotation-id] {
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
+}
+
+/* 标注颜色由内联 style="background:var(--annotation-bg-colorN)" 驱动 */
+
+/* CM6 实时预览/编辑模式下的 mark 标签字体颜色继承 */
+.cm-line mark[data-annotation-id] {
+  color: inherit;
+}
+
+/* ========== 批注效果 ========== */
+/* 每个 mark 通过 style 设置了 --annotation-accent 变量，批注效果直接引用 */
+
+/* 粗下划线 */
+[data-note-effect="underline-thick"] mark[data-annotation-note]:not([data-annotation-note=""]) {
+  border-bottom: 3px solid var(--annotation-accent, transparent);
+}
+
+/* 虚线下划线 */
+[data-note-effect="underline-dashed"] mark[data-annotation-note]:not([data-annotation-note=""]) {
+  border-bottom: 2px dashed var(--annotation-accent, transparent);
+}
+
+/* 波浪线 */
+[data-note-effect="underline-wavy"] mark[data-annotation-note]:not([data-annotation-note=""]) {
+  border-bottom: 2px wavy var(--annotation-accent, transparent);
+}
+
+/* 双下划线 */
+[data-note-effect="underline-double"] mark[data-annotation-note]:not([data-annotation-note=""]) {
+  border-bottom: 3px double var(--annotation-accent, transparent);
+}
+
+/* 全文标注提示 */
+.annotation-fulltext-hint {
+  padding: 6px 14px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-fulltext-hint span {
+  font-size: 12px;
+  color: var(--text-accent);
+  font-weight: 500;
+}
+
+/* 标注列表中的全文标注标记 */
+.annotation-list-badge {
+  font-size: 11px;
+  color: var(--text-accent);
+  background: rgba(var(--interactive-accent-rgb), 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* 标注视图中的 ruby 标签样式 */
+ruby[data-annotation-id] {
+  position: relative;
+}
+
+ruby[data-annotation-id] rt[data-annotation-id] {
+  font-size: var(--annotation-ruby-font-size, 0.7em);
+  color: var(--annotation-ruby-color, var(--text-muted));
+  font-weight: normal;
+}
+
+/* ========== 侧边栏标注管理视图 ========== */
+
+.annotation-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.annotation-sidebar-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-sidebar-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.annotation-sidebar-sort-select {
+  padding: 3px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.annotation-sidebar-sort-select:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.annotation-sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-sidebar-tab {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+@media (hover: hover) {
+  .annotation-sidebar-tab:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+}
+
+.annotation-sidebar-tab.active {
+  color: var(--interactive-accent);
+  border-bottom-color: var(--interactive-accent);
+}
+
+.annotation-sidebar-search {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-sidebar-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-size: 13px;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.annotation-sidebar-search-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.annotation-sidebar-color-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.annotation-sidebar-color-btn {
+  width: 20px;
+  height: 20px;
+  /* 同 .annotation-color-dot 的宿主主题防御（-all 文本变体宽高为 auto，不受 aspect-ratio/min 尺寸影响） */
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  aspect-ratio: 1 / 1;
+  min-width: 20px;
+  min-height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+@media (hover: hover) {
+  .annotation-sidebar-color-btn:hover {
+    transform: scale(1.15);
+  }
+}
+
+.annotation-sidebar-color-btn.active {
+  border-color: var(--text-normal);
+  box-shadow: 0 0 0 2px var(--background-primary);
+}
+
+.annotation-sidebar-color-btn.annotation-sidebar-color-all {
+  width: auto;
+  height: auto;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.annotation-sidebar-color-btn.annotation-sidebar-color-all.active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* 颜色按钮复用 annotation-list-dot 的颜色 */
+
+.annotation-sidebar-card-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 8px;
+}
+
+.annotation-sidebar-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+@media (hover: hover) {
+  .annotation-sidebar-card:hover {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+}
+
+.annotation-sidebar-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.annotation-sidebar-card-header .annotation-list-dot {
+  flex-shrink: 0;
+}
+
+.annotation-sidebar-card-filename {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-sidebar-card-text {
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 1.4;
+  word-break: break-word;
+  margin-bottom: 4px;
+}
+
+.annotation-sidebar-card-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.annotation-sidebar-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.annotation-sidebar-card-actions .annotation-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  min-width: auto;
+  flex: 0;
+}
+
+.annotation-sidebar-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 32px 16px;
+  font-size: 14px;
+}
+
+/* ========== 侧边栏标注详情面板 ========== */
+
+.annotation-sidebar-detail {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 12px;
+}
+
+.annotation-sidebar-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annotation-sidebar-detail-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-normal);
+}
+
+.annotation-sidebar-detail-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (hover: hover) {
+  .annotation-sidebar-detail-close:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.annotation-sidebar-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annotation-sidebar-detail-section label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.annotation-sidebar-detail-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.annotation-sidebar-detail-label-row label {
+  margin-bottom: 0;
+}
+
+.annotation-sidebar-detail-text {
+  font-size: 14px;
+  color: var(--text-normal);
+  line-height: 1.5;
+  padding: 8px 10px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  word-break: break-word;
+  border-left: 3px solid var(--interactive-accent);
+  white-space: pre-wrap;
+  user-select: text;
+  cursor: text;
+}
+
+.annotation-sidebar-detail-section .annotation-list-badge {
+  align-self: flex-start;
+}
+
+.annotation-sidebar-detail-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.annotation-sidebar-detail-color .annotation-list-dot {
+  width: 16px;
+  height: 16px;
+}
+
+.annotation-sidebar-detail-note {
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 1.5;
+  padding: 8px 10px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  word-break: break-word;
+  white-space: pre-wrap;
+  user-select: text;
+  cursor: text;
+}
+
+.annotation-sidebar-detail-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.annotation-sidebar-detail-textarea:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.annotation-sidebar-detail-ruby-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.annotation-sidebar-detail-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+}
+
+.annotation-sidebar-detail-actions .annotation-btn {
+  flex: 1;
+  min-width: 60px;
+}
+
+.annotation-sidebar-card-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ========== 导出按钮 ========== */
+.annotation-sidebar-export-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: auto;
+  margin-right: 6px;
+  transition: all 0.15s ease;
+}
+
+@media (hover: hover) {
+  .annotation-sidebar-export-btn:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--interactive-accent);
+  }
+}
+
+.annotation-sidebar-export-btn.is-hidden {
+  display: none;
+}
+
+/* ========== 导出 callout 颜色 ========== */
+.callout[data-callout^="annotation-"] {
+  --callout-color: 153, 153, 153;
+}
+
+.callout[data-callout="annotation-1"] {
+  --callout-color: 255, 107, 107;
+}
+
+.callout[data-callout="annotation-2"] {
+  --callout-color: 84, 160, 255;
+}
+
+.callout[data-callout="annotation-3"] {
+  --callout-color: 255, 212, 59;
+}
+
+.callout[data-callout="annotation-4"] {
+  --callout-color: 38, 194, 129;
+}
+
+.callout[data-callout="annotation-5"] {
+  --callout-color: 155, 89, 182;
+}
+
+.callout[data-callout="annotation-6"] {
+  --callout-color: 255, 159, 67;
+}
+
+.callout[data-callout="annotation-7"] {
+  --callout-color: 0, 210, 211;
+}
+
+.callout[data-callout="annotation-8"] {
+  --callout-color: 243, 104, 224;
+}
+
+.callout[data-callout="annotation-9"] {
+  --callout-color: 131, 149, 167;
+}
+
+.callout[data-callout="annotation-10"] {
+  --callout-color: 127, 140, 63;
+}
+
+.callout[data-callout="annotation-none"] {
+  --callout-color: 153, 153, 153;
+}
+
+/* ========== 审核修复：内联静态样式迁移为 class ========== */
+
+/* 导出弹窗输入框（原 ExportModal 内联静态样式） */
+.annotation-export-input {
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+}
+
+/* 滚动定位高亮（原 scrollToAnnotation 内联静态样式） */
+.annotation-scroll-highlight {
+  transition: box-shadow 0.3s ease;
+  box-shadow: 0 0 0 3px var(--interactive-accent);
+}
+
+/* ===== 触屏按压反馈（:active 不受 hover 媒体查询限制，补偿触屏上被禁用的悬停态）===== */
+.annotation-color-dot:active {
+  transform: scale(0.9);
+}
+
+.annotation-sidebar-color-btn:active {
+  transform: scale(0.9);
+}
+
+.annotation-list-item:active {
+  background: var(--background-modifier-hover);
+}
+
+.annotation-context-menu-item:active {
+  background: var(--background-modifier-hover);
+}
+
+/* ==================================================================
+ * [ZCode patch] 幕布风：整体更紧凑的标注悬浮窗 / 批注列表
+ * 只覆盖尺寸与间距，颜色仍走 Obsidian 主题变量，避免和 ZCode 打架
+ * ================================================================== */
+
+/* ---- 添加标注 / 查看标注 悬浮窗 ---- */
+.annotation-card-menu {
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 16px));
+  font-size: 12.5px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+/* 「添加标注」窗可拖右下角缩放，尺寸会记到设置里（下次打开沿用）。
+   默认宽度和原来一致（280px），用户拖出来的宽度以行内样式覆盖 */
+.annotation-card-menu.annotation-selection-menu {
+  width: 280px;
+  resize: both;
+  overflow: hidden;
+  min-width: 220px;
+  min-height: 140px;
+  max-width: min(460px, calc(100vw - 24px));
+  max-height: min(80vh, 720px);
+}
+
+/* 悬浮窗与批注列表的标题栏用同一套尺寸：28px 高、同样的内边距 / 字号 / 关闭按钮，
+   标题和 × 都在同一条中线上（两处只差右边有没有排序下拉） */
+.annotation-menu-header,
+.annotation-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 8px 8px 0 0;
+}
+
+.annotation-menu-title,
+.annotation-list-title {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.annotation-menu-close,
+.annotation-list-close {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 悬浮窗没有排序下拉，关闭按钮直接贴右 */
+.annotation-menu-close {
+  margin-left: auto;
+}
+
+.annotation-menu-preview {
+  padding: 5px 10px;
+}
+
+.annotation-menu-preview span {
+  font-size: 11.5px;
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.annotation-menu-section {
+  padding: 6px 10px;
+}
+
+.annotation-menu-section label {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.annotation-color-buttons {
+  gap: 6px;
+}
+
+/* 双写类名 + !important 覆盖原插件的 28px 触控圆点；
+   外观改成和 ZCode 荧光笔色板一致的圆角色块（5px 圆角 + 内描边） */
+.annotation-color-dot.annotation-color-dot {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  min-height: 20px !important;
+  max-width: 20px !important;
+  max-height: 20px !important;
+  border-width: 2px !important;
+  border-radius: 5px !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+/* 选中态：深色描边 + 背景色隔离环，保持和原插件一致的可见度 */
+.annotation-color-dot.annotation-color-dot.active {
+  border-color: var(--text-normal) !important;
+  box-shadow:
+    0 0 0 2px var(--background-primary),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.annotation-note-input-small {
+  padding: 5px 8px;
+  min-height: 52px;
+  height: 54px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  border-radius: 6px;
+  /* 紫色描边常驻，不再只在聚焦时出现 */
+  border-color: var(--interactive-accent);
+}
+
+.annotation-note-input-small:focus {
+  border-color: var(--interactive-accent);
+}
+
+/* 「批注内容」与字数：统一行高、去掉外边距，保证同一水平线 */
+.annotation-note-label-row {
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.annotation-note-label-row label,
+.annotation-menu-note label {
+  font-size: 11px;
+  line-height: 1;
+  margin: 0;
+}
+
+.annotation-char-count {
+  font-size: 10.5px;
+  line-height: 1;
+  margin: 0;
+  opacity: 0.7;
+}
+
+.annotation-ruby-input-row label,
+.annotation-ruby-checkbox-row label {
+  font-size: 11px;
+}
+
+/* 注音：不用色块底（跟随菜单自带底色），只保留上方一条细线作分隔；
+   高度 26px、上下留白对称，顶部间距从 12+12 收到 4，底部保持原样 */
+.annotation-ruby-section {
+  margin-top: 4px;
+  padding-top: 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.annotation-ruby-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.annotation-ruby-row:hover,
+.annotation-ruby-row.is-active {
+  background: transparent;
+  color: var(--text-normal);
+}
+
+.annotation-ruby-row .annotation-ruby-checkbox {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+}
+
+.annotation-ruby-row label {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.annotation-ruby-section .annotation-ruby-input-container {
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.annotation-ruby-text-preview {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.annotation-ruby-input {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.annotation-action-row {
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.annotation-action-row .annotation-btn {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* ---- 查看批注浮窗：去掉原文引用 / 跨段提示后的紧凑版 ---- */
+.annotation-view-menu {
+  min-width: 210px;
+}
+
+.annotation-view-menu .annotation-menu-note {
+  padding: 6px 10px;
+}
+
+.annotation-view-menu .annotation-note-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.annotation-note-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.annotation-view-menu .annotation-menu-actions {
+  padding: 6px 8px;
+  gap: 6px;
+}
+
+.annotation-view-menu .annotation-menu-actions .annotation-btn {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* ---- 右侧「批注列表」浮动面板 ---- */
+.annotation-list-panel {
+  width: 260px;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+/* 标题栏尺寸在文件上方与悬浮窗统一（同一套 .annotation-menu-header / .annotation-list-header 规则） */
+.annotation-list-sort-container {
+  margin: 0 0 0 auto;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.annotation-list-sort-select {
+  min-width: 0;
+  max-width: 112px;
+  height: 20px;
+  padding: 0 4px;
+  font-size: 10.5px;
+  line-height: 18px;
+  border-radius: 4px;
+}
+
+.annotation-list-close {
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.annotation-list-content {
+  padding: 4px;
+  max-height: calc(50vh - 44px);
+}
+
+.annotation-list-item {
+  padding: 5px 7px;
+  gap: 6px;
+  border-radius: 5px;
+}
+
+/* 条目之间加一条细分隔线，每条批注一眼能分开 */
+.annotation-list-item + .annotation-list-item {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* 纵向两段：上边 跨段徽标 + 原文（暗色），下边 批注（亮白、字号稍微大一点） */
+.annotation-list-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.annotation-list-text {
+  flex: 0 0 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  /* 和「添加标注」悬浮窗里的选区预览同一档暗度 */
+  color: color-mix(in srgb, var(--text-normal) 70%, transparent);
+}
+
+.annotation-list-note {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-normal);
+}
+
+.annotation-list-note-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 1px;
+  opacity: 0.85;
+}
+
+.annotation-list-note-icon svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.annotation-list-note-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.annotation-list-badge {
+  margin-right: 2px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  padding: 0 5px;
+}
+
+.annotation-list-dot {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
+.annotation-list-empty {
+  padding: 16px 8px;
+  font-size: 12px;
+}
+
+/* ---- 右下角入口按钮：Obsidian 风格图标 ---- */
+.annotation-list-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+  color: var(--icon-color, var(--text-muted));
+}
+
+.annotation-list-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.annotation-list-btn span.annotation-list-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+  line-height: 0;
+}
+
+.annotation-list-btn span.annotation-list-btn-icon svg {
+  display: block;
+}
+
+/* ---- Adjustable Media：布局尺寸就位前不要让图片先按原始比例撑大 ----
+   打开 / 关闭批注视图会重新渲染整个视图，AM 的图片在拿到行高（--vml-row-height）
+   之前是 height:auto，会先按原图比例撑大一下再回落到设定高度，看起来就是「突然变大」。
+   这里给行高一个兜底值，并在行高写入之前隐藏图片；AM 在插入 DOM 时就会写行高，
+   所以正常情况下同一帧完成，用户看不到任何过渡。 */
+body.mubu-style .vml-row {
+  --vml-row-height: 180px;
+}
+
+body.mubu-style .vml-item__media {
+  opacity: 0;
+}
+
+body.mubu-style .vml-row[style*="--vml-row-height"] .vml-item__media,
+body.mubu-style .vml-row:has([style*="--vml-row-height"]) .vml-item__media {
+  opacity: 1;
+}
+
+/* 单图布局的宽度来自 --vml-natural-width（图片加载后才写入），在写入前 width:auto
+   会先按原图宽度画一帧，同样会「突然变大」，所以也等它到位 */
+body.mubu-style .vml-row--single .vml-item__media:not([style*="--vml-natural-width"]) {
+  opacity: 0;
+}
+
+/* AM 把 <!-- vml --> 块加工成布局之前，Obsidian 会先把这些图片按普通 Markdown 铺一帧
+   （原图尺寸，看着像「图片突然变大」）。gateVmlBoot() 会给这一帧里的 img 打上
+   mubu-vml-pending，等 AM 换掉它们就自然消失。 */
+body.mubu-style img.mubu-vml-pending {
+  visibility: hidden;
+}
+
+/* 换文件那一瞬间更早的那一帧：prepareVmlBoot() 在 openFile 之前就给 leaf 打标记，
+   这一格里所有还没被 AM 接管的图先不画，1.5 秒后自动失效 */
+body.mubu-style .mubu-vml-booting img:not(.vml-item__media) {
+  visibility: hidden;
+}
+
+/* ---- 与 ZCode 同字体：标注菜单 / 批注列表 / 右键菜单 / 悬浮提示 / 侧栏 / 导入导出框 ----
+   这些浮层用的是 Obsidian 的 --font-interface（系统界面字体），而 ZCode 只把正文的
+   --font-text 换成了幕布字体（Mubu Sans = Source Sans Pro + 系统中文字体）。
+   这里在浮层根节点上把 --font-interface 指向 --mubu-font：自定义属性会继承，
+   子元素里所有 font-family: var(--font-interface) / inherit 都会跟着变成幕布字体。
+   只在 ZCode 启用时生效，关了插件就回到 Obsidian 原样。 */
+body.mubu-style .annotation-card-menu,
+body.mubu-style .annotation-list-panel,
+body.mubu-style .annotation-context-menu,
+body.mubu-style .annotation-highlight-tooltip,
+body.mubu-style .annotation-sidebar,
+body.mubu-style .modal:has(.annotation-import-info),
+body.mubu-style .modal:has(.annotation-modal-preview) {
+  --font-interface: var(
+    --mubu-font,
+    "Mubu Sans",
+    "Source Sans Pro",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif
+  );
+  font-family: var(--font-interface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- 视图右上角的「标注模式」图标在批注视图里显示为开启状态 ----
+   普通笔记里是灰色描边；进了批注视图（同一位置点它即可关闭）高亮成幕布紫。 */
+.view-action.mubu-annotation-view-action.is-active {
+  color: var(--interactive-accent);
+}
+.view-action.mubu-annotation-view-action.is-active:hover {
+  color: var(--interactive-accent-hover, var(--interactive-accent));
+}
+
