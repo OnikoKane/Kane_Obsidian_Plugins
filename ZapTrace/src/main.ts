@@ -129,6 +129,7 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 			this.rebuildTimer = null;
 		}
 		void this.store.flush();
+		document.body.classList.remove("zaptrace-force-dark");
 		document.body.classList.remove("zaptrace-mubu-dark");
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_ZAPTRACE);
 	}
@@ -232,8 +233,9 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 	}
 
 	private applyTheme(): void {
+		// mubu-dark 保留为「强制暗色令牌」兼容开关（不改 schema）
 		document.body.classList.toggle(
-			"zaptrace-mubu-dark",
+			"zaptrace-force-dark",
 			this.settings.theme === "mubu-dark"
 		);
 	}

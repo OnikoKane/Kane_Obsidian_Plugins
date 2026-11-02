@@ -7,12 +7,10 @@ import { createButton, createCollapsible, clearElement } from "./dom.ts";
 import { createRenderScope, type RenderScope } from "./renderOwner.ts";
 
 /**
- * 左栏练习区（DESIGN §7.1 / §10.3）。
- *
- * H4 门禁：
- * - viewing 态：只渲染题干；答案/笔记/评分条 DOM 都不存在；
- * - `handleKeydown` 只在 `session.canRate` 时接受 1–4；
- * - 真正的写盘只发生在 `session.rate()` 内部（非 revealed 返回 null）。
+ * 练习面板（DESIGN-v2 §5.6 抽屉内容；行为与 H4 门禁完全不变）：
+ * - viewing：只渲染题干，答案/笔记/评分条 DOM 不存在；
+ * - 1–4 仅在 revealed 生效（handleKeydown 先排除输入控件）；
+ * - 写盘只发生在 session.rate() 内部。
  */
 export class PracticePanel {
 	private readonly host: HTMLElement;
@@ -28,7 +26,6 @@ export class PracticePanel {
 		this.ownerComponent = ownerComponent;
 	}
 
-	/** 卸载上一轮渲染作用域，再为这一轮新建（MarkdownRenderer 生命周期）。 */
 	private beginRender(): RenderScope {
 		if (this.scope) {
 			this.scope.unload();
@@ -38,7 +35,7 @@ export class PracticePanel {
 		return this.scope;
 	}
 
-	hasSession(): boolean {
+	get hasActiveSession(): boolean {
 		return this.session !== null && !this.session.finished;
 	}
 
@@ -55,14 +52,12 @@ export class PracticePanel {
 		this.render();
 	}
 
-	/** 返回 true 表示按键已消费。 */
 	handleKeydown(event: KeyboardEvent): boolean {
-		// 输入控件内一律不处理快捷键（H4：焦点在搜索框时按 1–4 不能评分）
 		if (this.isTypingTarget(event.target)) return false;
 		const session = this.session;
 		if (!session || session.finished) return false;
 		if (event.key >= "1" && event.key <= "4") {
-			if (!session.canRate) return false; // H4：未揭晓直接不响应
+			if (!session.canRate) return false;
 			event.preventDefault();
 			const map: Rating[] = ["again", "hard", "good", "easy"];
 			this.rate(map[Number(event.key) - 1]);
@@ -103,78 +98,62 @@ export class PracticePanel {
 		}
 
 		const wrap = document.createElement("div");
-		wrap.className = "zt-practice";
+		wrap.className = "pd-practice";
 
-		// 进度
 		const progress = document.createElement("div");
-		progress.className = "zt-progress";
+		progress.className = "pd-progress";
 		const text = document.createElement("span");
-		text.className = "zt-progress-text";
+		text.className = "pd-progress-text";
 		text.textContent = `${session.progress().position} / ${session.progress().total}`;
 		const track = document.createElement("div");
-		track.className = "zt-progress-track";
+		track.className = "pd-progress-track";
 		const fill = document.createElement("div");
-		fill.className = "zt-progress-fill";
+		fill.className = "pd-progress-fill";
 		fill.style.width = `${(session.position / Math.max(session.total, 1)) * 100}%`;
 		track.appendChild(fill);
 		progress.append(text, track);
 		wrap.appendChild(progress);
 
-		// 题干
 		const stem = document.createElement("div");
-		stem.className = "zt-practice-stem";
-		void MarkdownRenderer.render(
-			this.plugin.app,
-			card.stem,
-			stem,
-			card.file,
-			scope
-		);
+		stem.className = "pd-practice-stem pd-body";
+		void MarkdownRenderer.render(this.plugin.app, card.stem, stem, card.file, scope);
 		wrap.appendChild(stem);
 
 		if (session.canReveal) {
 			const actions = document.createElement("div");
-			actions.className = "zt-practice-actions";
-			const revealLabel = this.plugin.settings.requireAnswerBeforeReveal
-				? "我写完了，显示答案"
-				: "显示答案";
+			actions.className = "pd-practice-actions";
 			createButton(actions, {
-				label: revealLabel,
-				cls: "zt-button zt-button-primary",
+				label: this.plugin.settings.requireAnswerBeforeReveal
+					? "我写完了，显示答案"
+					: "显示答案",
+				cls: "pd-btn is-primary",
 				onClick: () => this.reveal(),
 			});
 			createButton(actions, {
 				label: "跳过",
-				cls: "zt-button zt-button-ghost",
+				cls: "pd-btn",
 				onClick: () => this.skip(),
 			});
 			wrap.appendChild(actions);
 			const hint = document.createElement("div");
-			hint.className = "zt-practice-hint";
+			hint.className = "pd-hint";
 			hint.textContent = "先在纸上/心里作答，再揭晓答案。";
 			wrap.appendChild(hint);
 		} else {
-			// 揭晓后才注入答案与笔记 DOM
 			const answerBox = document.createElement("div");
-			answerBox.className = "zt-answer";
-			const answerLabel = document.createElement("div");
-			answerLabel.className = "zt-answer-label";
-			answerLabel.textContent = "答案";
-			answerBox.appendChild(answerLabel);
-			const answerBody = document.createElement("div");
-			answerBox.appendChild(answerBody);
+			answerBox.className = "pd-answer";
+			const label = document.createElement("div");
+			label.className = "pd-answer-label";
+			label.textContent = "答案";
+			const body = document.createElement("div");
+			body.className = "pd-body";
 			if (card.answer.trim() === "") {
-				answerBody.textContent = "⚠ 缺少答案分节";
-				answerBody.classList.add("zt-card-error");
+				body.textContent = "缺少答案分节";
+				body.classList.add("pd-card-error");
 			} else {
-				void MarkdownRenderer.render(
-					this.plugin.app,
-					card.answer,
-					answerBody,
-					card.file,
-					scope
-				);
+				void MarkdownRenderer.render(this.plugin.app, card.answer, body, card.file, scope);
 			}
+			answerBox.append(label, body);
 			wrap.appendChild(answerBox);
 
 			if (card.notes.trim() !== "") {
@@ -204,7 +183,7 @@ export class PracticePanel {
 
 			if (this.status) {
 				const status = document.createElement("div");
-				status.className = "zt-rate-status";
+				status.className = "pd-rate-status";
 				status.setAttribute("aria-live", "polite");
 				status.textContent = this.status;
 				wrap.appendChild(status);
@@ -216,7 +195,7 @@ export class PracticePanel {
 				);
 				wrap.appendChild(bar);
 				const hint = document.createElement("div");
-				hint.className = "zt-practice-hint";
+				hint.className = "pd-hint";
 				hint.textContent = "1–4 快捷键评分 · ←/→ 移动 · Enter 确认";
 				wrap.appendChild(hint);
 			}
@@ -227,13 +206,13 @@ export class PracticePanel {
 
 	private renderIdle(): void {
 		const empty = document.createElement("div");
-		empty.className = "zt-empty";
+		empty.className = "pd-empty pd-empty-small";
 		const title = document.createElement("div");
-		title.className = "zt-empty-title";
+		title.className = "pd-empty-title";
 		title.textContent = "选一道题开始练习";
 		const hint = document.createElement("div");
-		hint.className = "zt-empty-hint";
-		hint.textContent = "从「题集」点一行，或在「复习」里按科目开始。";
+		hint.className = "pd-empty-desc";
+		hint.textContent = "点题卡流中的卡片，或使用「继续上次复习」。";
 		empty.append(title, hint);
 		this.host.appendChild(empty);
 	}
@@ -241,17 +220,17 @@ export class PracticePanel {
 	private renderSummary(): void {
 		const session = this.session;
 		const empty = document.createElement("div");
-		empty.className = "zt-empty";
+		empty.className = "pd-empty pd-empty-small";
 		const title = document.createElement("div");
-		title.className = "zt-empty-title";
+		title.className = "pd-empty-title";
 		title.textContent = "本组完成";
 		const hint = document.createElement("div");
-		hint.className = "zt-empty-hint";
+		hint.className = "pd-empty-desc";
 		hint.textContent = session ? session.summary() : "";
 		empty.append(title, hint);
 		createButton(empty, {
 			label: "再练一题",
-			cls: "zt-button zt-button-ghost",
+			cls: "pd-btn",
 			onClick: () => {
 				const cards = this.plugin.getCards();
 				if (cards.length === 0) return;
@@ -278,7 +257,8 @@ export class PracticePanel {
 		this.render();
 	}
 
-	private rate(rating: Rating): void {		const session = this.session;
+	private rate(rating: Rating): void {
+		const session = this.session;
 		if (!session) return;
 		const card = session.current;
 		if (!card) return;
@@ -287,7 +267,7 @@ export class PracticePanel {
 			at: this.plugin.nowIso(),
 			elapsedMs: session.elapsedMs(Date.now()),
 		});
-		if (!result) return; // 未揭晓 / 已评分：不写盘
+		if (!result) return;
 		this.plugin.requestSave();
 		this.status = `已安排：${result.due} 复习`;
 		this.render();

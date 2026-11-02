@@ -3,12 +3,12 @@ import { RATING_LABELS, RATINGS } from "../core/types.ts";
 import { ratingPreview } from "../core/format.ts";
 
 /**
- * 评分条（DESIGN §10.6）。只有调用方在 revealed 之后才创建它（H4）。
- * 语义：radiogroup + radio；←/→ 移动焦点，Enter/Space 由原生 button 触发。
+ * 评分条（H4：只有 revealed 之后才由调用方创建）。
+ * 语义 radiogroup + radio；←/→ 移动焦点，Enter/Space 由原生 button 触发。
  */
 export function buildRatingBar(step: number, onRate: (rating: Rating) => void): HTMLElement {
 	const bar = document.createElement("div");
-	bar.className = "zt-rating";
+	bar.className = "pd-rating";
 	bar.setAttribute("role", "radiogroup");
 	bar.setAttribute("aria-label", "回忆评分");
 
@@ -16,17 +16,17 @@ export function buildRatingBar(step: number, onRate: (rating: Rating) => void): 
 	RATINGS.forEach((rating, index) => {
 		const button = document.createElement("button");
 		button.type = "button";
-		button.className = "zt-rating-btn";
+		button.className = "pd-rating-btn";
 		button.dataset.rating = rating;
 		button.setAttribute("role", "radio");
 		button.setAttribute("aria-checked", "false");
 		button.setAttribute("tabindex", index === 0 ? "0" : "-1");
 
 		const label = document.createElement("span");
-		label.className = "zt-rating-label";
+		label.className = "pd-rating-label";
 		label.textContent = RATING_LABELS[rating];
 		const preview = document.createElement("span");
-		preview.className = "zt-rating-preview";
+		preview.className = "pd-rating-preview";
 		preview.textContent = ratingPreview(step, rating);
 		button.append(label, preview);
 

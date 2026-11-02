@@ -1,28 +1,29 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import type { PluginContext, WorkbenchHandle } from "./pluginContext.ts";
 import type { QuestionCard } from "../core/types.ts";
 import { PracticePanel } from "./practicePanel.ts";
-import { LibraryPanel } from "./libraryPanel.ts";
-import { ReviewPanel } from "./reviewPanel.ts";
-import { createButton, clearElement } from "./dom.ts";
+import { LibraryPage } from "./libraryPanel.ts";
+import { clearElement } from "./dom.ts";
+import { closeAllMenus } from "./menu.ts";
 
 export const VIEW_TYPE_ZAPTRACE = "zaptrace-workbench";
 
 type TabKey = "practice" | "library" | "review";
 
 /**
- * 三栏工作台（DESIGN §2）。桌面三栏；< 900px 收为单栏 + 底部 Tab（无 JS 依赖，纯 CSS + class 切换）。
+ * 题库工作台（DESIGN-v2 §5）：单页题库 + 右侧练习抽屉（≥1440 分栏 / <1440 覆盖 / <720 全屏）。
+ * 练习行为、评分门禁、复习算法全部沿用原实现。
  */
 export class ZaptraceView extends ItemView implements WorkbenchHandle {
 	private readonly plugin: PluginContext;
+	private library!: LibraryPage;
 	private practice!: PracticePanel;
-	private library!: LibraryPanel;
-	private review!: ReviewPanel;
-	private badgeEl: HTMLElement | null = null;
-	private sections: Record<TabKey, HTMLElement> | null = null;
-	private tabButtons: Record<TabKey, HTMLButtonElement> | null = null;
-	private activeTab: TabKey = "practice";
+	private drawer: HTMLElement | null = null;
+	private mask: HTMLElement | null = null;
+	private triggerEl: HTMLElement | null = null;
 	private unregister: (() => void) | null = null;
+	private drawerOpen = false;
+	private resumeButton: HTMLButtonElement | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PluginContext) {
 		super(leaf);
@@ -38,105 +39,75 @@ export class ZaptraceView extends ItemView implements WorkbenchHandle {
 	}
 
 	getIcon(): string {
-		return "graduation-cap";
+		return "library";
 	}
 
 	async onOpen(): Promise<void> {
 		const root = this.contentEl;
 		clearElement(root);
-		root.classList.add("zaptrace-workbench");
+		root.classList.add("pd-root", "pd-workbench", "zaptrace-workbench");
 		root.setAttribute("role", "region");
-		root.setAttribute("aria-label", "ZapTrace");
+		root.setAttribute("aria-label", "ZapTrace 题库");
 		root.tabIndex = -1;
 
-		// 顶栏
-		const topbar = document.createElement("header");
-		topbar.className = "zt-topbar";
-		const title = document.createElement("div");
-		title.className = "zt-title";
-		title.textContent = "ZapTrace";
-		const badge = document.createElement("span");
-		badge.className = "zt-topbar-badge";
-		badge.setAttribute("aria-live", "polite");
-		this.badgeEl = badge;
-		const actions = document.createElement("div");
-		actions.className = "zt-topbar-actions";
-		createButton(actions, {
-			label: "重建索引",
-			cls: "zt-button zt-button-ghost zt-button-small",
-			icon: "refresh-cw",
-			onClick: () => {
-				void this.plugin.rebuildIndex();
-			},
+		const body = document.createElement("div");
+		body.className = "pd-lib-body";
+
+		const main = document.createElement("div");
+		main.className = "pd-lib-main";
+		body.appendChild(main);
+
+		const drawer = document.createElement("aside");
+		drawer.className = "pd-drawer";
+		drawer.setAttribute("role", "complementary");
+		drawer.setAttribute("aria-label", "练习");
+		const drawerHead = document.createElement("div");
+		drawerHead.className = "pd-drawer-head";
+		const drawerTitle = document.createElement("h2");
+		drawerTitle.className = "pd-drawer-title";
+		drawerTitle.textContent = "练习";
+		const closeBtn = document.createElement("button");
+		closeBtn.type = "button";
+		closeBtn.className = "pd-icon-btn";
+		closeBtn.setAttribute("aria-label", "关闭练习");
+		setIcon(closeBtn, "x");
+		closeBtn.addEventListener("click", () => this.closeDrawer());
+		drawerHead.append(drawerTitle, closeBtn);
+		const drawerBody = document.createElement("div");
+		drawerBody.className = "pd-drawer-body";
+		drawer.append(drawerHead, drawerBody);
+		body.appendChild(drawer);
+		root.appendChild(body);
+
+		const mask = document.createElement("div");
+		mask.className = "pd-drawer-mask";
+		mask.addEventListener("click", () => this.closeDrawer());
+		root.appendChild(mask);
+
+		this.library = new LibraryPage(main, this.plugin, this);
+		this.practice = new PracticePanel(drawerBody, this.plugin, this);
+		this.drawer = drawer;
+		this.mask = mask;
+
+		const resume = document.createElement("button");
+		resume.type = "button";
+		resume.className = "pd-btn is-primary pd-resume";
+		resume.textContent = "继续练习";
+		resume.hidden = true;
+		resume.addEventListener("click", () => {
+			this.openDrawer();
+			this.practice.render();
 		});
-		createButton(actions, {
-			label: "设置",
-			cls: "zt-button zt-button-ghost zt-button-small",
-			icon: "settings",
-			onClick: () => this.plugin.openSettings(),
-		});
-		topbar.append(title, badge, actions);
-		root.appendChild(topbar);
-
-		// 三栏
-		const columns = document.createElement("div");
-		columns.className = "zt-columns";
-
-		const buildSection = (tab: TabKey, heading: string): HTMLElement => {
-			const section = document.createElement("section");
-			section.className = `zt-panel zt-panel-${tab}`;
-			section.dataset.tab = tab;
-			const head = document.createElement("h2");
-			head.className = "zt-panel-title";
-			head.textContent = heading;
-			const body = document.createElement("div");
-			body.className = "zt-panel-body";
-			section.append(head, body);
-			columns.appendChild(section);
-			return body;
-		};
-
-		const practiceBody = buildSection("practice", "练习");
-		const libraryBody = buildSection("library", "题集");
-		const reviewBody = buildSection("review", "复习");
-		root.appendChild(columns);
-
-		this.practice = new PracticePanel(practiceBody, this.plugin, this);
-		this.library = new LibraryPanel(libraryBody, this.plugin, this);
-		this.review = new ReviewPanel(reviewBody, this.plugin, this);
-
-		this.sections = {
-			practice: practiceBody.parentElement as HTMLElement,
-			library: libraryBody.parentElement as HTMLElement,
-			review: reviewBody.parentElement as HTMLElement,
-		};
-
-		// 移动端底部 Tab
-		const tabs = document.createElement("nav");
-		tabs.className = "zt-tabs";
-		tabs.setAttribute("role", "tablist");
-		const tabButtons = {} as Record<TabKey, HTMLButtonElement>;
-		const labels: Array<[TabKey, string]> = [
-			["practice", "练习"],
-			["library", "题集"],
-			["review", "复习"],
-		];
-		for (const [tab, label] of labels) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = "zt-tab";
-			button.setAttribute("role", "tab");
-			button.setAttribute("aria-selected", String(tab === this.activeTab));
-			button.textContent = label;
-			button.addEventListener("click", () => this.setActiveTab(tab));
-			tabs.appendChild(button);
-			tabButtons[tab] = button;
-		}
-		this.tabButtons = tabButtons;
-		root.appendChild(tabs);
+		root.appendChild(resume);
+		this.resumeButton = resume;
 
 		this.registerDomEvent(root, "keydown", (event) => {
-			if (this.practice.handleKeydown(event)) return;
+			if (event.key === "Escape" && this.drawerOpen) {
+				event.preventDefault();
+				this.closeDrawer();
+				return;
+			}
+			if (this.drawerOpen && this.practice.handleKeydown(event)) return;
 			if (event.key === "/" && !this.isTypingTarget(event.target)) {
 				event.preventDefault();
 				this.library.focusSearch();
@@ -144,47 +115,67 @@ export class ZaptraceView extends ItemView implements WorkbenchHandle {
 		});
 
 		this.unregister = this.plugin.registerWorkbench(this);
-		this.setActiveTab("practice");
 		this.refreshAll();
 	}
 
 	async onClose(): Promise<void> {
+		closeAllMenus();
 		this.unregister?.();
 		this.unregister = null;
 		clearElement(this.contentEl);
 	}
 
+	/* ---------------- WorkbenchHandle ---------------- */
+
 	refreshAll(): void {
-		const today = this.plugin.today();
-		const dueCount = this.plugin.getCards().filter((card) => {
-			const state = this.plugin.getState(card.qid);
-			return Boolean(state && state.due && state.due <= today);
-		}).length;
-		if (this.badgeEl) this.badgeEl.textContent = `今日复习 ${dueCount}`;
-		this.practice.render();
 		this.library.refresh();
-		this.review.refresh();
+		this.practice.render();
 	}
 
 	startPractice(cards: QuestionCard[]): void {
 		if (cards.length === 0) return;
-		this.setActiveTab("practice");
+		this.triggerEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		this.openDrawer();
 		this.practice.start(cards);
-		this.contentEl.focus();
+		const first = this.drawer?.querySelector<HTMLElement>(
+			".pd-practice-actions button, .pd-practice button"
+		);
+		first?.focus();
 	}
 
 	setActiveTab(tab: TabKey): void {
-		this.activeTab = tab;
-		if (this.sections) {
-			for (const key of Object.keys(this.sections) as TabKey[]) {
-				this.sections[key].classList.toggle("is-active", key === tab);
-			}
+		if (tab === "practice") {
+			this.openDrawer();
+			return;
 		}
-		if (this.tabButtons) {
-			for (const key of Object.keys(this.tabButtons) as TabKey[]) {
-				this.tabButtons[key].setAttribute("aria-selected", String(key === tab));
-			}
+		this.library.setView(tab === "review" ? "review" : "cards");
+	}
+
+	/* ---------------- 抽屉 ---------------- */
+
+	private openDrawer(): void {
+		this.drawerOpen = true;
+		this.contentEl.classList.add("is-drawer-open");
+		if (this.drawer) {
+			this.drawer.hidden = false;
+			const overlay = window.innerWidth < 1440;
+			this.drawer.setAttribute("role", overlay ? "dialog" : "complementary");
+			if (overlay) this.drawer.setAttribute("aria-modal", "true");
+			else this.drawer.removeAttribute("aria-modal");
 		}
+		if (this.mask) this.mask.hidden = false;
+		if (this.resumeButton) this.resumeButton.hidden = true;
+	}
+
+	private closeDrawer(): void {
+		this.drawerOpen = false;
+		this.contentEl.classList.remove("is-drawer-open");
+		if (this.drawer) this.drawer.hidden = true;
+		if (this.mask) this.mask.hidden = true;
+		// 关闭不丢当前会话：保留 PracticePanel 内存状态，提供「继续练习」入口
+		if (this.resumeButton) this.resumeButton.hidden = !this.practice.hasActiveSession;
+		if (this.triggerEl && this.triggerEl.isConnected) this.triggerEl.focus();
+		this.triggerEl = null;
 	}
 
 	private isTypingTarget(target: EventTarget | null): boolean {

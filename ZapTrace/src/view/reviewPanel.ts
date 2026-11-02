@@ -8,7 +8,7 @@ import { clearElement, createButton } from "./dom.ts";
 import { createRenderScope, type RenderScope } from "./renderOwner.ts";
 
 /**
- * 右栏复习区（DESIGN §7.2 / §7.3 / §10.5）。
+ * 独立复习视图（DESIGN-v2 §5.5.3；复习算法与口径完全不变，只换视觉外壳）。
  */
 export class ReviewPanel {
 	private readonly host: HTMLElement;
@@ -23,7 +23,6 @@ export class ReviewPanel {
 		this.ownerComponent = ownerComponent;
 	}
 
-	/** 每轮刷新前卸载上一轮渲染作用域（统一 MarkdownRenderer 生命周期）。 */
 	private beginRender(): void {
 		if (this.scope) {
 			this.scope.unload();
@@ -35,6 +34,10 @@ export class ReviewPanel {
 	refresh(): void {
 		this.beginRender();
 		clearElement(this.host);
+		const root = document.createElement("div");
+		root.className = "pd-review";
+		this.host.appendChild(root);
+
 		const today = this.plugin.today();
 		const cards = this.plugin.getCards();
 		const dueCards = cards
@@ -54,54 +57,54 @@ export class ReviewPanel {
 				return a.qid < b.qid ? -1 : 1;
 			});
 
-		this.renderHead(dueCards.length);
-		this.renderGroups(dueCards, today);
+		this.renderHead(root, dueCards.length);
+		this.renderGroups(root, dueCards);
 
 		const divider = document.createElement("div");
-		divider.className = "zt-divider";
-		this.host.appendChild(divider);
-		this.renderLog(today);
+		divider.className = "pd-divider";
+		root.appendChild(divider);
+		this.renderLog(root, today);
 	}
 
-	private renderHead(count: number): void {
+	private renderHead(host: HTMLElement, count: number): void {
 		const head = document.createElement("div");
-		head.className = "zt-review-head";
+		head.className = "pd-review-card pd-review-head";
 		const number = document.createElement("div");
-		number.className = "zt-review-count";
+		number.className = "pd-review-count";
 		number.textContent = String(count);
 		const label = document.createElement("div");
-		label.className = "zt-review-label";
+		label.className = "pd-review-label";
 		label.textContent = "今日到期";
 		head.append(number, label);
 		const limit = this.plugin.settings.dailyReviewLimit;
 		if (count > limit) {
 			const more = document.createElement("div");
-			more.className = "zt-review-more";
+			more.className = "pd-review-more";
 			more.textContent = `+${count - limit} 顺延（每日上限 ${limit}）`;
 			head.appendChild(more);
 		}
 		createButton(head, {
 			label: "随机练一题",
-			cls: "zt-button zt-button-ghost",
+			cls: "pd-btn",
 			onClick: () => this.practiceRandom(),
 		});
-		this.host.appendChild(head);
+		host.appendChild(head);
 	}
 
-	private renderGroups(dueCards: QuestionCard[], today: string): void {
+	private renderGroups(host: HTMLElement, dueCards: QuestionCard[]): void {
 		if (dueCards.length === 0) {
 			const empty = document.createElement("div");
-			empty.className = "zt-empty zt-empty-small";
+			empty.className = "pd-empty pd-empty-small";
 			const title = document.createElement("div");
-			title.className = "zt-empty-title";
+			title.className = "pd-empty-title";
 			title.textContent = "今日无到期，去练一题？";
 			empty.appendChild(title);
 			createButton(empty, {
 				label: "随机练一题",
-				cls: "zt-button zt-button-ghost",
+				cls: "pd-btn",
 				onClick: () => this.practiceRandom(),
 			});
-			this.host.appendChild(empty);
+			host.appendChild(empty);
 			return;
 		}
 
@@ -119,36 +122,35 @@ export class ReviewPanel {
 		for (const subject of subjects) {
 			const list = groups.get(subject) ?? [];
 			const group = document.createElement("div");
-			group.className = "zt-review-group";
+			group.className = "pd-group";
 
 			const header = document.createElement("div");
-			header.className = "zt-group-head";
+			header.className = "pd-group-head";
 			const toggle = document.createElement("button");
 			toggle.type = "button";
-			toggle.className = "zt-group-toggle";
-			const controls = `zt-group-body-${subject.replace(/[^\w\u4e00-\u9fa5]/g, "")}`;
+			toggle.className = "pd-group-toggle";
+			const controls = `pd-group-body-${subject.replace(/[^\w\u4e00-\u9fa5]/g, "")}`;
 			toggle.setAttribute("aria-expanded", "false");
 			toggle.setAttribute("aria-controls", controls);
 			const name = document.createElement("span");
-			name.className = "zt-group-name";
+			name.className = "pd-group-name";
 			name.textContent = subject;
 			const count = document.createElement("span");
-			count.className = "zt-group-count";
+			count.className = "pd-group-count";
 			count.textContent = String(list.length);
 			toggle.append(name, count);
 			header.appendChild(toggle);
 
 			createButton(header, {
 				label: "开始组卷",
-				cls: "zt-button zt-button-ghost zt-button-small",
+				cls: "pd-btn pd-btn-small",
 				onClick: () => {
-					const queue = list.slice(0, limit);
-					void this.plugin.startPractice(queue);
+					void this.plugin.startPractice(list.slice(0, limit));
 				},
 			});
 
 			const body = document.createElement("div");
-			body.className = "zt-group-body";
+			body.className = "pd-group-body";
 			body.id = controls;
 			body.hidden = true;
 			let filled = false;
@@ -161,13 +163,13 @@ export class ReviewPanel {
 					for (const card of list) {
 						const row = document.createElement("button");
 						row.type = "button";
-						row.className = "zt-review-row";
+						row.className = "pd-review-row";
 						const title = document.createElement("span");
-						title.className = "zt-row-title";
+						title.className = "pd-review-title";
 						title.textContent = firstLine(card.stem) || "（空题干）";
 						const state = this.plugin.getState(card.qid);
 						const due = document.createElement("span");
-						due.className = "zt-badge zt-badge-danger";
+						due.className = "pd-review-due";
 						due.textContent = state?.due ?? "";
 						row.append(title, due);
 						row.addEventListener("click", () => {
@@ -179,22 +181,22 @@ export class ReviewPanel {
 			});
 
 			group.append(header, body);
-			this.host.appendChild(group);
+			host.appendChild(group);
 		}
 	}
 
-	private renderLog(today: string): void {
+	private renderLog(host: HTMLElement, today: string): void {
 		const wrap = document.createElement("div");
-		wrap.className = "zt-log";
+		wrap.className = "pd-log";
 		const header = document.createElement("div");
-		header.className = "zt-log-head";
+		header.className = "pd-log-head";
 		const title = document.createElement("div");
-		title.className = "zt-log-title";
+		title.className = "pd-log-title";
 		title.textContent = "时间记录";
 		header.appendChild(title);
 		createButton(header, {
 			label: this.showWeekLog ? "只看今天" : "近 7 天",
-			cls: "zt-button zt-button-ghost zt-button-small",
+			cls: "pd-btn pd-btn-small",
 			onClick: () => {
 				this.showWeekLog = !this.showWeekLog;
 				this.refresh();
@@ -213,10 +215,10 @@ export class ReviewPanel {
 
 		if (entries.length === 0) {
 			const empty = document.createElement("div");
-			empty.className = "zt-empty zt-empty-tiny";
+			empty.className = "pd-empty pd-empty-tiny";
 			empty.textContent = "暂无练习记录。";
 			wrap.appendChild(empty);
-			this.host.appendChild(wrap);
+			host.appendChild(wrap);
 			return;
 		}
 
@@ -226,27 +228,27 @@ export class ReviewPanel {
 			if (date !== lastDate) {
 				lastDate = date;
 				const dateLabel = document.createElement("div");
-				dateLabel.className = "zt-log-date";
+				dateLabel.className = "pd-log-date";
 				dateLabel.textContent = date;
 				wrap.appendChild(dateLabel);
 			}
 			wrap.appendChild(this.buildLogRow(entry));
 		}
-		this.host.appendChild(wrap);
+		host.appendChild(wrap);
 	}
 
 	private buildLogRow(entry: ReviewLogEntry): HTMLElement {
 		const row = document.createElement("button");
 		row.type = "button";
-		row.className = "zt-log-row";
+		row.className = "pd-log-row";
 		const time = document.createElement("span");
-		time.className = "zt-log-time";
+		time.className = "pd-log-time";
 		time.textContent = entry.at.slice(11, 16);
 		const rating = document.createElement("span");
-		rating.className = `zt-log-rating zt-log-${entry.rating}`;
+		rating.className = `pd-log-rating pd-log-${entry.rating}`;
 		rating.textContent = RATING_LABELS[entry.rating];
 		const subject = document.createElement("span");
-		subject.className = "zt-log-subject";
+		subject.className = "pd-log-subject";
 		subject.textContent = entry.subject;
 		row.append(time, rating, subject);
 		row.addEventListener("click", () => {

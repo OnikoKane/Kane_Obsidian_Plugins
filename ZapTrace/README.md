@@ -8,12 +8,12 @@
 ## 特性
 
 - **Markdown 题卡**：围栏代码块（```` ```zaptrace ````）承载一道题，题干/答案/个人笔记/AI 笔记分节；节内支持完整 Markdown 与 LaTeX（`$…$`、`$$…$$`），由 Obsidian 的 `MarkdownRenderer` 渲染。
-- **阅读视图题卡**：题干常显，答案与笔记默认折叠且**懒渲染**（不展开就不注入 DOM，防偷看）；Star 可切换；显示出处；语法错误就地提示行号；底部提供「定位原文」，可打开源笔记并跳到题卡所在行。
-- **三栏工作台**：左「练习」/ 中「题集」/ 右「复习」。题集支持搜索、科目、Tags 交集、时间（今天到期 / 已到期 / 7 天内 / 未练）、排序与收藏筛选；每行可「练习」或「打开原文」（定位按钮不影响主点击），可跳回源文档。
+- **阅读视图 Quiet Card**：单层 1px 边、无卡内第二层框、无卡片投影；学科 + 知识点为 22px 标签 chip；答案 / 个人笔记 / AI 笔记是三条 **38px 扁平折叠行**（220ms `grid-template-rows` 展开、懒渲染、无内框无底色）；`⋯` 菜单 hover 才出现，收藏在菜单内；出处与「定位原文 / 练习此卡」文本按钮同基线。
+- **题库页面**：页头「题库 + 全部题目计数 + 搜索 + 主 CTA」→ 6 个状态 chips（全部 / 到期复习 / 已收藏 / 未练 / 需完善 / 错题，计数互不排斥可重叠）→ 科目 / Tags / 排序筛选 → 分段视图「**题卡流 / 紧凑表格 / 独立复习**」。题卡流响应式双列（≥1024px 双列），点卡片进入右侧**练习抽屉**（≥1440 分栏、<1440 覆盖、<720 全屏），「查看详情」打开原文并定位；紧凑表格与题卡流共用同一筛选结果。
 - **先作答再看答案**：未揭晓时答案 DOM 不存在、评分条不存在、`1–4` 快捷键不响应、**无任何写盘路径**（H4）。
 - **四档回忆评分**：忘记 / 困难 / 想起 / 秒答 → 确定性间隔（1/3/7/15/30 天），记录本地日期与时间，并安排下次到期。
-- **复习队列**：按科目分组的今日到期、每日上限、按科目组卷（简单规则，非智能）、时间记录（近 7 天）。
-- **幕布风**：内容优先、中性灰、`#5854d4` 只用于选中控件、正文 16px / 2.1、动效 60–160ms、亮/暗主题、键盘焦点与 ARIA、`prefers-reduced-motion`、窄屏单栏 + 底部 Tab。
+- **复习队列**：独立复习视图保留按科目分组的今日到期、每日上限 +N 顺延、按科目组卷（简单规则，非智能）与时间记录（近 7 天）。
+- **Quiet Cards 视觉令牌**：`--pd-*` 暗/亮双主题；正文 16px / 2.1，UI 13px / 1.45，元信息 11.5 / 12.5px；卡片永远只有一条 1px 边且无投影（仅菜单有阴影）；动效 120 / 160 / 220ms；键盘焦点、ARIA、`prefers-reduced-motion`、`hover:none`、窄屏适配。
 - **数据安全**：`data.json` 带 `schemaVersion` 迁移与迁移前备份；结构损坏/版本过新进入**只读安全模式**，绝不覆盖写。
 
 ## 安装
@@ -98,15 +98,15 @@ $f'(1)=2$。
 
 | 命令 | 说明 |
 | --- | --- |
-| `ZapTrace: 打开工作台` | 打开三栏视图（也可点左侧 Ribbon） |
+| `ZapTrace: 打开工作台` | 打开题库页面（也可点左侧 Ribbon） |
 | `ZapTrace: 练习当前题卡` | 光标在 ```zaptrace 块内时直接练习 |
 | `ZapTrace: 插入题卡模板` | 在光标插入模板（唯一写 `.md` 的操作） |
 | `ZapTrace: 随机练一题` | 从索引随机取一题 |
 | `ZapTrace: 重建索引` | 全量重扫 |
 
-练习内：`Enter` 显示答案（焦点不在按钮时）、`1–4` 评分、`←/→` 在评分条内移动焦点、`/` 聚焦题集搜索。
+练习内：`Enter` 显示答案（焦点不在按钮时）、`1–4` 评分（仅揭晓后）、`←/→` 在评分条内移动焦点、`/` 聚焦题库搜索、`Esc` 关闭练习抽屉。
 
-来源跳转（只读）：阅读视图题卡底部与题集每一行的「定位原文 / 打开原文」按钮，会打开 `card.file` 对应笔记并把光标/视图定位到 `card.line-1`（题卡围栏首行）；不会修改任何 Markdown。
+来源跳转（只读）：阅读视图题卡底部「定位原文」与题库卡片「查看详情 / ⋯ → 打开原文」，会打开 `card.file` 对应笔记并把光标/视图定位到 `card.line-1`（题卡围栏首行）；不会修改任何 Markdown。
 
 ## 开发
 
@@ -128,7 +128,7 @@ ZapTrace/
 ├── src/
 │   ├── core/        # types / hash / id / date / scheduler / parse / index / state / filter / format / practice
 │   ├── store/       # stateStore（data.json 读写、防抖、只读、备份）
-│   ├── view/        # card / practicePanel / libraryPanel / reviewPanel / workbenchView / settingsTab / dom / ratingBar / renderOwner
+│   ├── view/        # card / libraryPanel（题库页）/ practicePanel / reviewPanel / workbenchView / settingsTab / dom / ratingBar / renderOwner / menu / libStatus
 │   ├── template.ts
 │   └── main.ts      # 插件入口（命令 / Ribbon / 视图 / 渲染器 / 事件清理）
 ├── tests/           # node:test：解析、ID、调度、日期边界、迁移/只读、筛选、练习门禁
@@ -156,6 +156,7 @@ ZapTrace/
 - 大库全量重扫（首版），500 题量级可接受；后续版本考虑增量索引。
 - `data.json` 的多设备同步冲突依赖 Obsidian Sync 的文件级同步，请自行评估。
 - 注：MarkdownRenderer 的渲染生命周期按「每次渲染一个 RenderScope」管理（阅读视图用 `ctx.addChild`，工作台面板重渲染前 unload 上一轮），不会把插件实例当作长期 owner。
+- Quiet Cards 改版只改视觉与信息架构：`src/core/**`、`src/store/stateStore.ts`、`data.json` 结构与解析/评分/复习算法均未改动；`examples/zaptrace-demo.md` 未修改。UI（折叠、菜单、抽屉、双列网格）需在真实 Obsidian 1.14.x 中人工走查，本仓库未提供运行时截图。
 
 ## License
 

@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => ZapTracePlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/core/hash.ts
 function sha1Hex(input) {
@@ -983,36 +983,40 @@ var StateStore = class {
 };
 
 // src/view/card.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/view/dom.ts
 var import_obsidian = require("obsidian");
 var collapseSeq = 0;
 function createCollapsible(parent, label, options = {}) {
   const root = document.createElement("div");
-  root.className = "zt-collapse";
+  root.className = "zt-collapse pd-fold";
   root.setAttribute("data-open", options.startsOpen ? "true" : "false");
   const id = `zt-collapse-${++collapseSeq}`;
   const header = document.createElement("button");
   header.type = "button";
-  header.className = "zt-collapse-header";
+  header.className = "zt-collapse-header pd-fold-head";
   header.setAttribute("aria-expanded", options.startsOpen ? "true" : "false");
   header.setAttribute("aria-controls", id);
-  const dot = document.createElement("span");
-  dot.className = "zt-collapse-dot";
-  dot.setAttribute("aria-hidden", "true");
   const chevron = document.createElement("span");
-  chevron.className = "zt-collapse-chevron";
+  chevron.className = "zt-collapse-chevron pd-fold-chevron";
   chevron.setAttribute("aria-hidden", "true");
+  (0, import_obsidian.setIcon)(chevron, "chevron-right");
   const text = document.createElement("span");
-  text.className = "zt-collapse-label";
+  text.className = "zt-collapse-label pd-fold-label";
   text.textContent = label;
-  header.append(dot, chevron, text);
+  header.append(chevron, text);
+  if (options.count) {
+    const count = document.createElement("span");
+    count.className = "pd-fold-count";
+    count.textContent = options.count;
+    header.appendChild(count);
+  }
   const bodyWrap = document.createElement("div");
-  bodyWrap.className = "zt-collapse-body";
+  bodyWrap.className = "zt-collapse-body pd-fold-body";
   bodyWrap.id = id;
   const content = document.createElement("div");
-  content.className = "zt-collapse-inner";
+  content.className = "zt-collapse-inner pd-fold-content";
   bodyWrap.appendChild(content);
   root.append(header, bodyWrap);
   let loaded = false;
@@ -1039,7 +1043,7 @@ function createCollapsible(parent, label, options = {}) {
 function createButton(parent, options) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = options.cls ?? "zt-button";
+  button.className = options.cls ?? "pd-btn";
   if (options.icon)
     (0, import_obsidian.setIcon)(button, options.icon);
   if (options.ariaLabel)
@@ -1059,151 +1063,344 @@ function clearElement(el) {
     el.removeChild(el.firstChild);
 }
 
-// src/core/format.ts
-function dueBadge(state, today) {
-  if (!state || !isValidDateString(state.due)) {
-    return { text: "\u672A\u7EC3", tone: "none" };
+// src/view/menu.ts
+var import_obsidian2 = require("obsidian");
+var activeMenu = null;
+var activeCleanup = null;
+function closeActiveMenu() {
+  if (activeCleanup) {
+    activeCleanup();
+    activeCleanup = null;
   }
-  const due = state.due;
-  if (due < today)
-    return { text: "\u5DF2\u5230\u671F", tone: "danger" };
-  if (due === today)
-    return { text: "\u4ECA\u5929", tone: "accent" };
-  const days = diffDays(today, due);
-  if (days === 1)
-    return { text: "\u660E\u5929", tone: "muted" };
-  return { text: `${days} \u5929\u540E`, tone: "muted" };
-}
-function intervalLabel(days) {
-  if (days === 1)
-    return "\u660E\u5929";
-  return `${days} \u5929\u540E`;
-}
-function ratingPreview(step, rating) {
-  return intervalLabel(previewDays(step, rating));
-}
-function firstLine(text) {
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed !== "")
-      return trimmed;
+  if (activeMenu) {
+    activeMenu.remove();
+    activeMenu = null;
   }
-  return "";
+}
+function openMenu(anchor, items) {
+  closeActiveMenu();
+  if (items.length === 0)
+    return;
+  const menu = document.createElement("div");
+  menu.className = "pd-root pd-menu";
+  menu.setAttribute("role", "menu");
+  menu.style.visibility = "hidden";
+  for (const item of items) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `pd-menu-item${item.danger ? " is-danger" : ""}`;
+    button.setAttribute("role", "menuitem");
+    if (item.icon) {
+      const iconWrap = document.createElement("span");
+      iconWrap.className = "pd-menu-icon";
+      (0, import_obsidian2.setIcon)(iconWrap, item.icon);
+      button.appendChild(iconWrap);
+    }
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    button.appendChild(label);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeActiveMenu();
+      item.onSelect();
+    });
+    menu.appendChild(button);
+  }
+  document.body.appendChild(menu);
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth || 196;
+  const height = menu.offsetHeight || 0;
+  let left = rect.right - width;
+  if (left < 8)
+    left = 8;
+  let top = rect.bottom + 6;
+  if (top + height > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - height - 6);
+  }
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.visibility = "visible";
+  const onPointerDown = (event) => {
+    if (!menu.contains(event.target))
+      closeActiveMenu();
+  };
+  const onKeyDown = (event) => {
+    const buttons = Array.from(menu.querySelectorAll(".pd-menu-item"));
+    const currentIndex = buttons.indexOf(document.activeElement);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeActiveMenu();
+      anchor.focus();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const next = (currentIndex + delta + buttons.length) % buttons.length;
+      buttons[next]?.focus();
+    }
+  };
+  document.addEventListener("mousedown", onPointerDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
+  activeMenu = menu;
+  activeCleanup = () => {
+    document.removeEventListener("mousedown", onPointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+  };
+  menu.querySelector(".pd-menu-item")?.focus();
+}
+function closeAllMenus() {
+  closeActiveMenu();
+}
+
+// src/view/plainText.ts
+var MATRIX_ENV_RE = /\\begin\{(?:[pbBvV]?matrix\*?|array|cases|aligned)\}/;
+var COMMAND_SYMBOLS = {
+  "\\cdot": "\xB7",
+  "\\times": "\xD7",
+  "\\div": "\xF7",
+  "\\pm": "\xB1",
+  "\\mp": "\u2213",
+  "\\leq": "\u2264",
+  "\\le": "\u2264",
+  "\\geq": "\u2265",
+  "\\ge": "\u2265",
+  "\\neq": "\u2260",
+  "\\ne": "\u2260",
+  "\\approx": "\u2248",
+  "\\equiv": "\u2261",
+  "\\to": "\u2192",
+  "\\rightarrow": "\u2192",
+  "\\Rightarrow": "\u21D2",
+  "\\leftarrow": "\u2190",
+  "\\infty": "\u221E",
+  "\\partial": "\u2202",
+  "\\nabla": "\u2207",
+  "\\sum": "\u03A3",
+  "\\prod": "\u220F",
+  "\\int": "\u222B",
+  "\\Delta": "\u0394",
+  "\\delta": "\u03B4",
+  "\\alpha": "\u03B1",
+  "\\beta": "\u03B2",
+  "\\gamma": "\u03B3",
+  "\\theta": "\u03B8",
+  "\\lambda": "\u03BB",
+  "\\mu": "\u03BC",
+  "\\pi": "\u03C0",
+  "\\sigma": "\u03C3",
+  "\\phi": "\u03C6",
+  "\\omega": "\u03C9",
+  "\\lim": "lim",
+  "\\log": "log",
+  "\\ln": "ln",
+  "\\sin": "sin",
+  "\\cos": "cos",
+  "\\tan": "tan",
+  "\\max": "max",
+  "\\min": "min",
+  "\\exp": "exp"
+};
+var SYMBOL_RE = new RegExp(
+  Object.keys(COMMAND_SYMBOLS).sort((a, b) => b.length - a.length).map((key) => `${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z])`).join("|"),
+  "g"
+);
+function cleanInlineMath(raw) {
+  if (MATRIX_ENV_RE.test(raw))
+    return "\u3014\u77E9\u9635\u3015";
+  let s = raw;
+  s = s.replace(/\\(?:left|right|middle|big|Big|bigg|Bigg)\b/g, "");
+  for (const cmd of [
+    "text",
+    "textrm",
+    "mathrm",
+    "mathbf",
+    "mathit",
+    "mathsf",
+    "operatorname",
+    "mathcal",
+    "mathbb"
+  ]) {
+    const re = new RegExp(`\\\\${cmd}\\s*\\{([^{}]*)\\}`, "g");
+    s = s.replace(re, "$1");
+  }
+  for (let i = 0; i < 3; i++) {
+    const next = s.replace(/\\(?:d|c|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "$1/$2");
+    if (next === s)
+      break;
+    s = next;
+  }
+  s = s.replace(SYMBOL_RE, (match) => COMMAND_SYMBOLS[match] ?? " ");
+  s = s.replace(/\\begin\{[^}]*\}|\\end\{[^}]*\}/g, " ");
+  s = s.replace(/\\[a-zA-Z]+/g, " ");
+  s = s.replace(/\^\s*\{([^{}]*)\}/g, "^$1");
+  s = s.replace(/_\s*\{([^{}]*)\}/g, "_$1");
+  s = s.replace(/[{}\\]/g, " ");
+  s = s.replace(/&/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  return s === "" ? "\u3014\u516C\u5F0F\u3015" : s;
+}
+function toPreviewText(text, maxLength = 180) {
+  if (!text)
+    return "";
+  let out = text;
+  out = out.replace(/```[\s\S]*?```/g, " ");
+  out = out.replace(/\$\$[\s\S]*?\$\$/g, " \u3014\u516C\u5F0F\u3015 ");
+  out = out.replace(/\\\[[\s\S]*?\\\]/g, " \u3014\u516C\u5F0F\u3015 ");
+  out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_match, inner) => ` ${cleanInlineMath(inner)} `);
+  out = out.replace(/\$([^$\n]+)\$/g, (_match, inner) => ` ${cleanInlineMath(inner)} `);
+  out = out.replace(/`([^`]*)`/g, "$1");
+  out = out.replace(/!\[[^\]]*\]\([^)]*\)/g, " ");
+  out = out.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  out = out.replace(/^[ \t]*#{1,6}[ \t]*/gm, "");
+  out = out.replace(/^[ \t]*[-*+][ \t]+/gm, "");
+  out = out.replace(/^[ \t]*>[ \t]?/gm, "");
+  out = out.replace(/[*_~]{1,3}/g, "");
+  out = out.replace(/<[^>]+>/g, " ");
+  out = out.replace(/\\[a-zA-Z]+/g, " ");
+  out = out.replace(/[{}]/g, " ");
+  out = out.replace(/\s+/g, " ").trim();
+  const readable = text.replace(/```[\s\S]*?```/g, " ").replace(/\$\$[\s\S]*?\$\$/g, " ").replace(/\\\[[\s\S]*?\\\]/g, " ").replace(/\\\([\s\S]*?\\\)/g, " ").replace(/\$[^$\n]+?\$/g, " ").replace(/[\s\p{P}\p{S}]/gu, "");
+  if (readable === "")
+    out = "\uFF08\u516C\u5F0F\u9898\uFF09";
+  return out.length > maxLength ? `${out.slice(0, maxLength)}\u2026` : out;
 }
 
 // src/view/card.ts
 function renderMarkdown(plugin, text, el, sourcePath, owner) {
-  void import_obsidian2.MarkdownRenderer.render(plugin.app, text, el, sourcePath, owner);
+  void import_obsidian3.MarkdownRenderer.render(plugin.app, text, el, sourcePath, owner);
 }
-function buildMeta(plugin, card, host) {
-  const meta = document.createElement("div");
-  meta.className = "zt-card-meta";
+function lineCount(text) {
+  return text.split(/\r?\n/).filter((line) => line.trim() !== "").length;
+}
+function buildTags(card) {
+  const tags = document.createElement("div");
+  tags.className = "pd-tags";
   const subject = document.createElement("span");
-  subject.className = "zt-card-subject";
-  subject.textContent = card.subject;
-  meta.appendChild(subject);
-  for (const tag of card.tags) {
+  subject.className = "pd-tag is-subject";
+  subject.textContent = card.subject || "\u672A\u5206\u7C7B";
+  tags.appendChild(subject);
+  const topics = card.tags.slice(0, 3);
+  for (const tag of topics) {
     const chip = document.createElement("span");
-    chip.className = "zt-tag";
+    chip.className = "pd-tag is-topic";
     chip.textContent = tag;
-    meta.appendChild(chip);
+    tags.appendChild(chip);
   }
-  if (card.duplicateId) {
-    const warn = document.createElement("span");
-    warn.className = "zt-badge zt-badge-danger";
-    warn.textContent = "\u91CD\u590D\u5DF2\u9694\u79BB";
-    meta.appendChild(warn);
+  if (card.tags.length > topics.length) {
+    const more = document.createElement("span");
+    more.className = "pd-tag is-topic";
+    more.textContent = `+${card.tags.length - topics.length}`;
+    tags.appendChild(more);
   }
-  host.appendChild(meta);
+  return tags;
 }
-function buildStarButton(plugin, card) {
-  const state = plugin.getState(card.qid);
-  const starred = state ? state.star : card.starInitial;
+function buildCardMenuButton(plugin, card) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "zt-star";
-  button.setAttribute("aria-label", "\u6536\u85CF");
-  button.setAttribute("aria-pressed", String(starred));
-  if (starred)
-    button.classList.add("is-active");
-  (0, import_obsidian2.setIcon)(button, "star");
-  button.addEventListener("click", () => {
-    const now = plugin.toggleStar(card.qid);
-    button.setAttribute("aria-pressed", String(now));
-    button.classList.toggle("is-active", now);
-    plugin.requestSave();
-  });
-  return button;
-}
-function buildLocateButton(plugin, card, cls) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = cls ?? "zt-button zt-button-ghost zt-button-small";
-  button.setAttribute("aria-label", "\u5B9A\u4F4D\u539F\u6587");
-  (0, import_obsidian2.setIcon)(button, "crosshair");
-  const text = document.createElement("span");
-  text.textContent = "\u5B9A\u4F4D\u539F\u6587";
-  button.appendChild(text);
+  button.className = "pd-icon-btn pd-card-more";
+  button.dataset.tool = "more";
+  button.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
+  button.setAttribute("aria-haspopup", "menu");
+  (0, import_obsidian3.setIcon)(button, "more-horizontal");
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    void plugin.openSource(card);
+    const starred = plugin.getState(card.qid)?.star ?? card.starInitial;
+    openMenu(button, [
+      {
+        label: starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF",
+        icon: "star",
+        onSelect: () => {
+          plugin.toggleStar(card.qid);
+          plugin.requestSave();
+        }
+      },
+      {
+        label: "\u6253\u5F00\u539F\u6587",
+        icon: "external-link",
+        onSelect: () => {
+          void plugin.openSource(card);
+        }
+      },
+      {
+        label: "\u590D\u5236\u9898\u5E72",
+        icon: "copy",
+        onSelect: () => {
+          void navigator.clipboard.writeText(card.stem);
+        }
+      }
+    ]);
   });
   return button;
 }
 function renderQuestionCard(options) {
   const { plugin, card, host, owner, compact } = options;
   const root = document.createElement("div");
-  root.className = "zt-card";
+  root.className = "pd-root pd-card zt-card";
   root.dataset.qid = card.qid;
   root.dataset.file = card.file;
   if (compact) {
-    root.classList.add("zt-card-compact");
+    root.classList.add("pd-compact");
     const title = document.createElement("div");
-    title.className = "zt-card-compact-title";
-    title.textContent = firstLine(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
+    title.className = "pd-compact-title";
+    title.textContent = toPreviewText(card.stem, 80) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
     const hint = document.createElement("div");
-    hint.className = "zt-card-compact-hint";
-    hint.textContent = "\u5B9E\u65F6\u9884\u89C8\u53EA\u8BFB \xB7 \u5728\u9605\u8BFB\u89C6\u56FE\u6216\u5DE5\u4F5C\u53F0\u4F5C\u7B54\u8BC4\u5206";
-    const actions = document.createElement("div");
-    actions.className = "zt-card-compact-actions";
-    createButton(actions, {
+    hint.className = "pd-compact-hint";
+    hint.textContent = "\u5B9E\u65F6\u9884\u89C8\u53EA\u8BFB \xB7 \u5728\u9605\u8BFB\u89C6\u56FE\u6216\u5DE5\u4F5C\u53F0\u4F5C\u7B54";
+    const actions2 = document.createElement("div");
+    actions2.className = "pd-actions";
+    createButton(actions2, {
       label: "\u6253\u5F00\u5DE5\u4F5C\u53F0\u7EC3\u4E60",
-      cls: "zt-button",
+      cls: "pd-btn",
       onClick: () => {
         void plugin.startPractice([card]);
       }
     });
-    actions.appendChild(buildLocateButton(plugin, card));
-    root.append(title, hint, actions);
+    createButton(actions2, {
+      label: "\u5B9A\u4F4D\u539F\u6587",
+      cls: "pd-btn",
+      onClick: () => {
+        void plugin.openSource(card);
+      }
+    });
+    root.append(title, hint, actions2);
     host.appendChild(root);
     return root;
   }
   const head = document.createElement("div");
-  head.className = "zt-card-head";
-  buildMeta(plugin, card, head);
-  head.appendChild(buildStarButton(plugin, card));
+  head.className = "pd-card-head";
+  head.appendChild(buildTags(card));
+  const tools = document.createElement("div");
+  tools.className = "pd-card-tools";
+  tools.appendChild(buildCardMenuButton(plugin, card));
+  head.appendChild(tools);
   root.appendChild(head);
   const stem = document.createElement("div");
-  stem.className = "zt-stem";
+  stem.className = "pd-stem pd-body";
   renderMarkdown(plugin, card.stem, stem, card.file, owner);
   root.appendChild(stem);
   if (card.errors.length > 0) {
     const errors = document.createElement("div");
-    errors.className = "zt-card-error";
+    errors.className = "pd-card-error";
     errors.setAttribute("role", "status");
     for (const message of card.errors) {
       const line = document.createElement("div");
-      line.textContent = `\u26A0 ${message}`;
+      line.textContent = message;
       errors.appendChild(line);
     }
     root.appendChild(errors);
   }
-  createCollapsible(root, "\u7B54\u6848", {
+  const folds = document.createElement("div");
+  folds.className = "pd-folds";
+  root.appendChild(folds);
+  const answerLines = lineCount(card.answer);
+  createCollapsible(folds, "\u7B54\u6848", {
+    count: answerLines > 0 ? `${answerLines} \u884C` : void 0,
     onFirstOpen: (content) => {
       if (card.answer.trim() === "") {
         const missing = document.createElement("div");
-        missing.className = "zt-card-error";
-        missing.textContent = "\u26A0 \u7F3A\u5C11\u7B54\u6848\u5206\u8282";
+        missing.className = "pd-card-error";
+        missing.textContent = "\u7F3A\u5C11\u7B54\u6848\u5206\u8282";
         content.appendChild(missing);
         return;
       }
@@ -1211,37 +1408,55 @@ function renderQuestionCard(options) {
     }
   });
   if (card.notes.trim() !== "") {
-    createCollapsible(root, "\u4E2A\u4EBA\u7B14\u8BB0", {
+    createCollapsible(folds, "\u4E2A\u4EBA\u7B14\u8BB0", {
+      count: `${lineCount(card.notes)} \u884C`,
       onFirstOpen: (content) => renderMarkdown(plugin, card.notes, content, card.file, owner)
     });
   }
   if (card.aiNotes.trim() !== "") {
-    createCollapsible(root, "AI \u7B14\u8BB0", {
+    createCollapsible(folds, "AI \u7B14\u8BB0", {
+      count: `${lineCount(card.aiNotes)} \u884C`,
       onFirstOpen: (content) => renderMarkdown(plugin, card.aiNotes, content, card.file, owner)
     });
   }
-  const footer = document.createElement("div");
-  footer.className = "zt-card-foot";
+  const foot = document.createElement("div");
+  foot.className = "pd-card-foot";
   const source = document.createElement("span");
-  source.className = "zt-card-source";
-  source.textContent = card.source ? `\u51FA\u5904\uFF1A${card.source}` : "";
-  footer.appendChild(source);
-  footer.appendChild(buildLocateButton(plugin, card));
-  createButton(footer, {
+  source.className = "pd-source";
+  if (card.source) {
+    const prefix = document.createElement("span");
+    prefix.className = "pd-source-prefix";
+    prefix.textContent = "\u51FA\u5904\uFF1A";
+    source.appendChild(prefix);
+    source.appendChild(document.createTextNode(card.source));
+    source.title = card.source;
+  }
+  foot.appendChild(source);
+  const actions = document.createElement("div");
+  actions.className = "pd-actions";
+  createButton(actions, {
+    label: "\u5B9A\u4F4D\u539F\u6587",
+    cls: "pd-btn",
+    onClick: () => {
+      void plugin.openSource(card);
+    }
+  });
+  createButton(actions, {
     label: "\u7EC3\u4E60\u6B64\u5361",
-    cls: "zt-button zt-button-ghost",
+    cls: "pd-btn is-primary",
     onClick: () => {
       void plugin.startPractice([card]);
     }
   });
-  root.appendChild(footer);
+  foot.appendChild(actions);
+  root.appendChild(foot);
   host.appendChild(root);
   return root;
 }
 
 // src/view/renderOwner.ts
-var import_obsidian3 = require("obsidian");
-var RenderScope = class extends import_obsidian3.MarkdownRenderChild {
+var import_obsidian4 = require("obsidian");
+var RenderScope = class extends import_obsidian4.MarkdownRenderChild {
   constructor(containerEl) {
     super(containerEl);
   }
@@ -1251,8 +1466,8 @@ function createRenderScope(parent, containerEl) {
 }
 
 // src/view/settingsTab.ts
-var import_obsidian4 = require("obsidian");
-var ZaptraceSettingsTab = class extends import_obsidian4.PluginSettingTab {
+var import_obsidian5 = require("obsidian");
+var ZaptraceSettingsTab = class extends import_obsidian5.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1267,17 +1482,17 @@ var ZaptraceSettingsTab = class extends import_obsidian4.PluginSettingTab {
         "\u5F53\u524D\u4E3A\u53EA\u8BFB\u6A21\u5F0F\uFF08data.json \u7248\u672C\u9AD8\u4E8E\u63D2\u4EF6\u6216\u7ED3\u6784\u635F\u574F\uFF09\uFF0C\u8BBE\u7F6E\u4E0E\u8BC4\u5206\u4E0D\u4F1A\u4FDD\u5B58\u3002\u8BF7\u5148\u5907\u4EFD\u5E76\u4FEE\u590D data.json\u3002"
       );
     }
-    new import_obsidian4.Setting(containerEl).setName("\u9898\u5361\u76EE\u5F55").setDesc("\u9650\u5B9A\u626B\u63CF\u8303\u56F4\uFF1B\u7559\u7A7A\u8868\u793A\u626B\u63CF\u5168\u5E93\u3002").addText(
+    new import_obsidian5.Setting(containerEl).setName("\u9898\u5361\u76EE\u5F55").setDesc("\u9650\u5B9A\u626B\u63CF\u8303\u56F4\uFF1B\u7559\u7A7A\u8868\u793A\u626B\u63CF\u5168\u5E93\u3002").addText(
       (text) => text.setPlaceholder("\u4F8B\u5982 \u6570\u5B66/\u9898\u5E93").setValue(this.plugin.settings.cardFolder).onChange(async (value) => {
         await this.plugin.updateSettings({ cardFolder: value.trim() });
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("\u9ED8\u8BA4\u79D1\u76EE").setDesc("\u9898\u5361\u6CA1\u6709 subject \u65F6\u4F7F\u7528\uFF1B\u7559\u7A7A\u5219\u53D6\u6240\u5728\u6587\u4EF6\u5939\u540D\u3002").addText(
+    new import_obsidian5.Setting(containerEl).setName("\u9ED8\u8BA4\u79D1\u76EE").setDesc("\u9898\u5361\u6CA1\u6709 subject \u65F6\u4F7F\u7528\uFF1B\u7559\u7A7A\u5219\u53D6\u6240\u5728\u6587\u4EF6\u5939\u540D\u3002").addText(
       (text) => text.setValue(this.plugin.settings.defaultSubject).onChange(async (value) => {
         await this.plugin.updateSettings({ defaultSubject: value.trim() });
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("\u6BCF\u65E5\u590D\u4E60\u4E0A\u9650").setDesc("\u4ECA\u65E5\u961F\u5217/\u7EC4\u5377\u7684\u6700\u5927\u9898\u6570\uFF08\u9ED8\u8BA4 20\uFF0C\u4E0D\u590D\u7528\u5B66\u4E60\u7CFB\u7EDF\u7684 8 \u6761\u4E0A\u9650\uFF09\u3002").addText(
+    new import_obsidian5.Setting(containerEl).setName("\u6BCF\u65E5\u590D\u4E60\u4E0A\u9650").setDesc("\u4ECA\u65E5\u961F\u5217/\u7EC4\u5377\u7684\u6700\u5927\u9898\u6570\uFF08\u9ED8\u8BA4 20\uFF0C\u4E0D\u590D\u7528\u5B66\u4E60\u7CFB\u7EDF\u7684 8 \u6761\u4E0A\u9650\uFF09\u3002").addText(
       (text) => text.setValue(String(this.plugin.settings.dailyReviewLimit)).onChange(async (value) => {
         const parsed = Number.parseInt(value, 10);
         if (!Number.isFinite(parsed))
@@ -1287,31 +1502,31 @@ var ZaptraceSettingsTab = class extends import_obsidian4.PluginSettingTab {
         });
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("\u65E5\u671F\u6A21\u5F0F").setDesc("\u672C\u5730\uFF1A\u8BBE\u5907\u65F6\u533A\uFF1B\u56FA\u5B9A\uFF1AAsia/Shanghai\u3002").addDropdown(
+    new import_obsidian5.Setting(containerEl).setName("\u65E5\u671F\u6A21\u5F0F").setDesc("\u672C\u5730\uFF1A\u8BBE\u5907\u65F6\u533A\uFF1B\u56FA\u5B9A\uFF1AAsia/Shanghai\u3002").addDropdown(
       (dropdown) => dropdown.addOptions({ local: "\u672C\u5730\u65F6\u533A", fixed: "\u56FA\u5B9A Asia/Shanghai" }).setValue(this.plugin.settings.dateMode).onChange(async (value) => {
         await this.plugin.updateSettings({ dateMode: value === "fixed" ? "fixed" : "local" });
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("\u5FC5\u987B\u4F5C\u7B54\u540E\u624D\u80FD\u770B\u7B54\u6848").setDesc("\u5F00\u542F\u540E\uFF0C\u7EC3\u4E60\u65F6\u9700\u70B9\u300C\u6211\u5199\u5B8C\u4E86\u300D\u624D\u63ED\u6653\u7B54\u6848\u3002").addToggle(
+    new import_obsidian5.Setting(containerEl).setName("\u5FC5\u987B\u4F5C\u7B54\u540E\u624D\u80FD\u770B\u7B54\u6848").setDesc("\u5F00\u542F\u540E\uFF0C\u7EC3\u4E60\u65F6\u9700\u70B9\u300C\u6211\u5199\u5B8C\u4E86\u300D\u624D\u63ED\u6653\u7B54\u6848\u3002").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.requireAnswerBeforeReveal).onChange(async (value) => {
         await this.plugin.updateSettings({ requireAnswerBeforeReveal: value });
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("\u5B9E\u65F6\u9884\u89C8").setDesc("compact\uFF1A\u663E\u793A\u53EA\u8BFB\u7F29\u7565\u5361\uFF1Bsource\uFF1A\u4FDD\u7559\u6E90\u7801\u5757\u3002").addDropdown(
+    new import_obsidian5.Setting(containerEl).setName("\u5B9E\u65F6\u9884\u89C8").setDesc("compact\uFF1A\u663E\u793A\u53EA\u8BFB\u7F29\u7565\u5361\uFF1Bsource\uFF1A\u4FDD\u7559\u6E90\u7801\u5757\u3002").addDropdown(
       (dropdown) => dropdown.addOptions({ compact: "\u53EA\u8BFB\u7F29\u7565\u5361", source: "\u663E\u793A\u6E90\u7801" }).setValue(this.plugin.settings.livePreview).onChange(async (value) => {
         await this.plugin.updateSettings({
           livePreview: value === "source" ? "source" : "compact"
         });
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("\u5916\u89C2\u4E3B\u9898").setDesc("auto \u8DDF\u968F Obsidian\uFF1Bmubu-dark \u4F7F\u7528\u5E55\u5E03\u6697\u8272\u4EE4\u724C\u3002").addDropdown(
+    new import_obsidian5.Setting(containerEl).setName("\u5916\u89C2\u4E3B\u9898").setDesc("auto \u8DDF\u968F Obsidian\uFF1Bmubu-dark \u4F7F\u7528\u5E55\u5E03\u6697\u8272\u4EE4\u724C\u3002").addDropdown(
       (dropdown) => dropdown.addOptions({ auto: "\u8DDF\u968F Obsidian", "mubu-dark": "\u5E55\u5E03\u6697\u8272" }).setValue(this.plugin.settings.theme).onChange(async (value) => {
         await this.plugin.updateSettings({
           theme: value === "mubu-dark" ? "mubu-dark" : "auto"
         });
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("\u91CD\u5EFA\u7D22\u5F15").setDesc("\u91CD\u65B0\u626B\u63CF\u5168\u5E93\u7684 ```zaptrace \u9898\u5361\u3002").addButton(
+    new import_obsidian5.Setting(containerEl).setName("\u91CD\u5EFA\u7D22\u5F15").setDesc("\u91CD\u65B0\u626B\u63CF\u5168\u5E93\u7684 ```zaptrace \u9898\u5361\u3002").addButton(
       (button) => button.setButtonText("\u7ACB\u5373\u91CD\u5EFA").onClick(async () => {
         await this.plugin.rebuildIndex();
       })
@@ -1320,10 +1535,10 @@ var ZaptraceSettingsTab = class extends import_obsidian4.PluginSettingTab {
 };
 
 // src/view/workbenchView.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/view/practicePanel.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/core/practice.ts
 var PracticeSession = class {
@@ -1409,26 +1624,44 @@ var PracticeSession = class {
   }
 };
 
+// src/core/format.ts
+function intervalLabel(days) {
+  if (days === 1)
+    return "\u660E\u5929";
+  return `${days} \u5929\u540E`;
+}
+function ratingPreview(step, rating) {
+  return intervalLabel(previewDays(step, rating));
+}
+function firstLine(text) {
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed !== "")
+      return trimmed;
+  }
+  return "";
+}
+
 // src/view/ratingBar.ts
 function buildRatingBar(step, onRate) {
   const bar = document.createElement("div");
-  bar.className = "zt-rating";
+  bar.className = "pd-rating";
   bar.setAttribute("role", "radiogroup");
   bar.setAttribute("aria-label", "\u56DE\u5FC6\u8BC4\u5206");
   const buttons = [];
   RATINGS.forEach((rating, index) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "zt-rating-btn";
+    button.className = "pd-rating-btn";
     button.dataset.rating = rating;
     button.setAttribute("role", "radio");
     button.setAttribute("aria-checked", "false");
     button.setAttribute("tabindex", index === 0 ? "0" : "-1");
     const label = document.createElement("span");
-    label.className = "zt-rating-label";
+    label.className = "pd-rating-label";
     label.textContent = RATING_LABELS[rating];
     const preview = document.createElement("span");
-    preview.className = "zt-rating-preview";
+    preview.className = "pd-rating-preview";
     preview.textContent = ratingPreview(step, rating);
     button.append(label, preview);
     button.addEventListener("click", () => onRate(rating));
@@ -1457,7 +1690,6 @@ var PracticePanel = class {
     this.plugin = plugin;
     this.ownerComponent = ownerComponent;
   }
-  /** 卸载上一轮渲染作用域，再为这一轮新建（MarkdownRenderer 生命周期）。 */
   beginRender() {
     if (this.scope) {
       this.scope.unload();
@@ -1466,7 +1698,7 @@ var PracticePanel = class {
     this.scope = createRenderScope(this.ownerComponent, this.host);
     return this.scope;
   }
-  hasSession() {
+  get hasActiveSession() {
     return this.session !== null && !this.session.finished;
   }
   start(cards) {
@@ -1480,7 +1712,6 @@ var PracticePanel = class {
     this.status = null;
     this.render();
   }
-  /** 返回 true 表示按键已消费。 */
   handleKeydown(event) {
     if (this.isTypingTarget(event.target))
       return false;
@@ -1529,74 +1760,61 @@ var PracticePanel = class {
       return;
     }
     const wrap = document.createElement("div");
-    wrap.className = "zt-practice";
+    wrap.className = "pd-practice";
     const progress = document.createElement("div");
-    progress.className = "zt-progress";
+    progress.className = "pd-progress";
     const text = document.createElement("span");
-    text.className = "zt-progress-text";
+    text.className = "pd-progress-text";
     text.textContent = `${session.progress().position} / ${session.progress().total}`;
     const track = document.createElement("div");
-    track.className = "zt-progress-track";
+    track.className = "pd-progress-track";
     const fill = document.createElement("div");
-    fill.className = "zt-progress-fill";
+    fill.className = "pd-progress-fill";
     fill.style.width = `${session.position / Math.max(session.total, 1) * 100}%`;
     track.appendChild(fill);
     progress.append(text, track);
     wrap.appendChild(progress);
     const stem = document.createElement("div");
-    stem.className = "zt-practice-stem";
-    void import_obsidian5.MarkdownRenderer.render(
-      this.plugin.app,
-      card.stem,
-      stem,
-      card.file,
-      scope
-    );
+    stem.className = "pd-practice-stem pd-body";
+    void import_obsidian6.MarkdownRenderer.render(this.plugin.app, card.stem, stem, card.file, scope);
     wrap.appendChild(stem);
     if (session.canReveal) {
       const actions = document.createElement("div");
-      actions.className = "zt-practice-actions";
-      const revealLabel = this.plugin.settings.requireAnswerBeforeReveal ? "\u6211\u5199\u5B8C\u4E86\uFF0C\u663E\u793A\u7B54\u6848" : "\u663E\u793A\u7B54\u6848";
+      actions.className = "pd-practice-actions";
       createButton(actions, {
-        label: revealLabel,
-        cls: "zt-button zt-button-primary",
+        label: this.plugin.settings.requireAnswerBeforeReveal ? "\u6211\u5199\u5B8C\u4E86\uFF0C\u663E\u793A\u7B54\u6848" : "\u663E\u793A\u7B54\u6848",
+        cls: "pd-btn is-primary",
         onClick: () => this.reveal()
       });
       createButton(actions, {
         label: "\u8DF3\u8FC7",
-        cls: "zt-button zt-button-ghost",
+        cls: "pd-btn",
         onClick: () => this.skip()
       });
       wrap.appendChild(actions);
       const hint = document.createElement("div");
-      hint.className = "zt-practice-hint";
+      hint.className = "pd-hint";
       hint.textContent = "\u5148\u5728\u7EB8\u4E0A/\u5FC3\u91CC\u4F5C\u7B54\uFF0C\u518D\u63ED\u6653\u7B54\u6848\u3002";
       wrap.appendChild(hint);
     } else {
       const answerBox = document.createElement("div");
-      answerBox.className = "zt-answer";
-      const answerLabel = document.createElement("div");
-      answerLabel.className = "zt-answer-label";
-      answerLabel.textContent = "\u7B54\u6848";
-      answerBox.appendChild(answerLabel);
-      const answerBody = document.createElement("div");
-      answerBox.appendChild(answerBody);
+      answerBox.className = "pd-answer";
+      const label = document.createElement("div");
+      label.className = "pd-answer-label";
+      label.textContent = "\u7B54\u6848";
+      const body = document.createElement("div");
+      body.className = "pd-body";
       if (card.answer.trim() === "") {
-        answerBody.textContent = "\u26A0 \u7F3A\u5C11\u7B54\u6848\u5206\u8282";
-        answerBody.classList.add("zt-card-error");
+        body.textContent = "\u7F3A\u5C11\u7B54\u6848\u5206\u8282";
+        body.classList.add("pd-card-error");
       } else {
-        void import_obsidian5.MarkdownRenderer.render(
-          this.plugin.app,
-          card.answer,
-          answerBody,
-          card.file,
-          scope
-        );
+        void import_obsidian6.MarkdownRenderer.render(this.plugin.app, card.answer, body, card.file, scope);
       }
+      answerBox.append(label, body);
       wrap.appendChild(answerBox);
       if (card.notes.trim() !== "") {
         createCollapsible(wrap, "\u4E2A\u4EBA\u7B14\u8BB0", {
-          onFirstOpen: (content) => void import_obsidian5.MarkdownRenderer.render(
+          onFirstOpen: (content) => void import_obsidian6.MarkdownRenderer.render(
             this.plugin.app,
             card.notes,
             content,
@@ -1607,7 +1825,7 @@ var PracticePanel = class {
       }
       if (card.aiNotes.trim() !== "") {
         createCollapsible(wrap, "AI \u7B14\u8BB0", {
-          onFirstOpen: (content) => void import_obsidian5.MarkdownRenderer.render(
+          onFirstOpen: (content) => void import_obsidian6.MarkdownRenderer.render(
             this.plugin.app,
             card.aiNotes,
             content,
@@ -1618,7 +1836,7 @@ var PracticePanel = class {
       }
       if (this.status) {
         const status = document.createElement("div");
-        status.className = "zt-rate-status";
+        status.className = "pd-rate-status";
         status.setAttribute("aria-live", "polite");
         status.textContent = this.status;
         wrap.appendChild(status);
@@ -1630,7 +1848,7 @@ var PracticePanel = class {
         );
         wrap.appendChild(bar);
         const hint = document.createElement("div");
-        hint.className = "zt-practice-hint";
+        hint.className = "pd-hint";
         hint.textContent = "1\u20134 \u5FEB\u6377\u952E\u8BC4\u5206 \xB7 \u2190/\u2192 \u79FB\u52A8 \xB7 Enter \u786E\u8BA4";
         wrap.appendChild(hint);
       }
@@ -1639,30 +1857,30 @@ var PracticePanel = class {
   }
   renderIdle() {
     const empty = document.createElement("div");
-    empty.className = "zt-empty";
+    empty.className = "pd-empty pd-empty-small";
     const title = document.createElement("div");
-    title.className = "zt-empty-title";
+    title.className = "pd-empty-title";
     title.textContent = "\u9009\u4E00\u9053\u9898\u5F00\u59CB\u7EC3\u4E60";
     const hint = document.createElement("div");
-    hint.className = "zt-empty-hint";
-    hint.textContent = "\u4ECE\u300C\u9898\u96C6\u300D\u70B9\u4E00\u884C\uFF0C\u6216\u5728\u300C\u590D\u4E60\u300D\u91CC\u6309\u79D1\u76EE\u5F00\u59CB\u3002";
+    hint.className = "pd-empty-desc";
+    hint.textContent = "\u70B9\u9898\u5361\u6D41\u4E2D\u7684\u5361\u7247\uFF0C\u6216\u4F7F\u7528\u300C\u7EE7\u7EED\u4E0A\u6B21\u590D\u4E60\u300D\u3002";
     empty.append(title, hint);
     this.host.appendChild(empty);
   }
   renderSummary() {
     const session = this.session;
     const empty = document.createElement("div");
-    empty.className = "zt-empty";
+    empty.className = "pd-empty pd-empty-small";
     const title = document.createElement("div");
-    title.className = "zt-empty-title";
+    title.className = "pd-empty-title";
     title.textContent = "\u672C\u7EC4\u5B8C\u6210";
     const hint = document.createElement("div");
-    hint.className = "zt-empty-hint";
+    hint.className = "pd-empty-desc";
     hint.textContent = session ? session.summary() : "";
     empty.append(title, hint);
     createButton(empty, {
       label: "\u518D\u7EC3\u4E00\u9898",
-      cls: "zt-button zt-button-ghost",
+      cls: "pd-btn",
       onClick: () => {
         const cards = this.plugin.getCards();
         if (cards.length === 0)
@@ -1723,7 +1941,7 @@ var PracticePanel = class {
 };
 
 // src/view/libraryPanel.ts
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/core/filter.ts
 function matchesFilter(card, state, filter, today) {
@@ -1835,6 +2053,241 @@ function emptyFilter() {
   return { search: "", tags: [], subject: null, time: "all", starredOnly: false };
 }
 
+// src/view/reviewPanel.ts
+var ReviewPanel = class {
+  constructor(host, plugin, ownerComponent) {
+    this.scope = null;
+    this.showWeekLog = false;
+    this.host = host;
+    this.plugin = plugin;
+    this.ownerComponent = ownerComponent;
+  }
+  beginRender() {
+    if (this.scope) {
+      this.scope.unload();
+      this.scope = null;
+    }
+    this.scope = createRenderScope(this.ownerComponent, this.host);
+  }
+  refresh() {
+    this.beginRender();
+    clearElement(this.host);
+    const root = document.createElement("div");
+    root.className = "pd-review";
+    this.host.appendChild(root);
+    const today = this.plugin.today();
+    const cards = this.plugin.getCards();
+    const dueCards = cards.filter((card) => {
+      const state = this.plugin.getState(card.qid);
+      return Boolean(state && state.due && state.due <= today);
+    }).sort((a, b) => {
+      const sa = this.plugin.getState(a.qid);
+      const sb = this.plugin.getState(b.qid);
+      const da = sa?.due ?? "";
+      const db = sb?.due ?? "";
+      if (da !== db)
+        return da < db ? -1 : 1;
+      const la = sa?.lapses ?? 0;
+      const lb = sb?.lapses ?? 0;
+      if (la !== lb)
+        return lb - la;
+      return a.qid < b.qid ? -1 : 1;
+    });
+    this.renderHead(root, dueCards.length);
+    this.renderGroups(root, dueCards);
+    const divider = document.createElement("div");
+    divider.className = "pd-divider";
+    root.appendChild(divider);
+    this.renderLog(root, today);
+  }
+  renderHead(host, count) {
+    const head = document.createElement("div");
+    head.className = "pd-review-card pd-review-head";
+    const number = document.createElement("div");
+    number.className = "pd-review-count";
+    number.textContent = String(count);
+    const label = document.createElement("div");
+    label.className = "pd-review-label";
+    label.textContent = "\u4ECA\u65E5\u5230\u671F";
+    head.append(number, label);
+    const limit = this.plugin.settings.dailyReviewLimit;
+    if (count > limit) {
+      const more = document.createElement("div");
+      more.className = "pd-review-more";
+      more.textContent = `+${count - limit} \u987A\u5EF6\uFF08\u6BCF\u65E5\u4E0A\u9650 ${limit}\uFF09`;
+      head.appendChild(more);
+    }
+    createButton(head, {
+      label: "\u968F\u673A\u7EC3\u4E00\u9898",
+      cls: "pd-btn",
+      onClick: () => this.practiceRandom()
+    });
+    host.appendChild(head);
+  }
+  renderGroups(host, dueCards) {
+    if (dueCards.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pd-empty pd-empty-small";
+      const title = document.createElement("div");
+      title.className = "pd-empty-title";
+      title.textContent = "\u4ECA\u65E5\u65E0\u5230\u671F\uFF0C\u53BB\u7EC3\u4E00\u9898\uFF1F";
+      empty.appendChild(title);
+      createButton(empty, {
+        label: "\u968F\u673A\u7EC3\u4E00\u9898",
+        cls: "pd-btn",
+        onClick: () => this.practiceRandom()
+      });
+      host.appendChild(empty);
+      return;
+    }
+    const groups = /* @__PURE__ */ new Map();
+    for (const card of dueCards) {
+      const list = groups.get(card.subject);
+      if (list)
+        list.push(card);
+      else
+        groups.set(card.subject, [card]);
+    }
+    const limit = this.plugin.settings.dailyReviewLimit;
+    const subjects = Array.from(groups.keys()).sort(
+      (a, b) => a.localeCompare(b, "zh-Hans-CN")
+    );
+    for (const subject of subjects) {
+      const list = groups.get(subject) ?? [];
+      const group = document.createElement("div");
+      group.className = "pd-group";
+      const header = document.createElement("div");
+      header.className = "pd-group-head";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "pd-group-toggle";
+      const controls = `pd-group-body-${subject.replace(/[^\w\u4e00-\u9fa5]/g, "")}`;
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-controls", controls);
+      const name = document.createElement("span");
+      name.className = "pd-group-name";
+      name.textContent = subject;
+      const count = document.createElement("span");
+      count.className = "pd-group-count";
+      count.textContent = String(list.length);
+      toggle.append(name, count);
+      header.appendChild(toggle);
+      createButton(header, {
+        label: "\u5F00\u59CB\u7EC4\u5377",
+        cls: "pd-btn pd-btn-small",
+        onClick: () => {
+          void this.plugin.startPractice(list.slice(0, limit));
+        }
+      });
+      const body = document.createElement("div");
+      body.className = "pd-group-body";
+      body.id = controls;
+      body.hidden = true;
+      let filled = false;
+      toggle.addEventListener("click", () => {
+        const expanded = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", String(!expanded));
+        body.hidden = expanded;
+        if (!expanded && !filled) {
+          filled = true;
+          for (const card of list) {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = "pd-review-row";
+            const title = document.createElement("span");
+            title.className = "pd-review-title";
+            title.textContent = firstLine(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
+            const state = this.plugin.getState(card.qid);
+            const due = document.createElement("span");
+            due.className = "pd-review-due";
+            due.textContent = state?.due ?? "";
+            row.append(title, due);
+            row.addEventListener("click", () => {
+              void this.plugin.startPractice([card]);
+            });
+            body.appendChild(row);
+          }
+        }
+      });
+      group.append(header, body);
+      host.appendChild(group);
+    }
+  }
+  renderLog(host, today) {
+    const wrap = document.createElement("div");
+    wrap.className = "pd-log";
+    const header = document.createElement("div");
+    header.className = "pd-log-head";
+    const title = document.createElement("div");
+    title.className = "pd-log-title";
+    title.textContent = "\u65F6\u95F4\u8BB0\u5F55";
+    header.appendChild(title);
+    createButton(header, {
+      label: this.showWeekLog ? "\u53EA\u770B\u4ECA\u5929" : "\u8FD1 7 \u5929",
+      cls: "pd-btn pd-btn-small",
+      onClick: () => {
+        this.showWeekLog = !this.showWeekLog;
+        this.refresh();
+      }
+    });
+    wrap.appendChild(header);
+    const from = this.showWeekLog ? addDays(today, -6) : today;
+    const entries = this.plugin.data.reviewLog.filter((entry) => {
+      const date = entry.at.slice(0, 10);
+      return date >= from && date <= today;
+    }).slice(-60).reverse();
+    if (entries.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pd-empty pd-empty-tiny";
+      empty.textContent = "\u6682\u65E0\u7EC3\u4E60\u8BB0\u5F55\u3002";
+      wrap.appendChild(empty);
+      host.appendChild(wrap);
+      return;
+    }
+    let lastDate = "";
+    for (const entry of entries) {
+      const date = entry.at.slice(0, 10);
+      if (date !== lastDate) {
+        lastDate = date;
+        const dateLabel = document.createElement("div");
+        dateLabel.className = "pd-log-date";
+        dateLabel.textContent = date;
+        wrap.appendChild(dateLabel);
+      }
+      wrap.appendChild(this.buildLogRow(entry));
+    }
+    host.appendChild(wrap);
+  }
+  buildLogRow(entry) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "pd-log-row";
+    const time = document.createElement("span");
+    time.className = "pd-log-time";
+    time.textContent = entry.at.slice(11, 16);
+    const rating = document.createElement("span");
+    rating.className = `pd-log-rating pd-log-${entry.rating}`;
+    rating.textContent = RATING_LABELS[entry.rating];
+    const subject = document.createElement("span");
+    subject.className = "pd-log-subject";
+    subject.textContent = entry.subject;
+    row.append(time, rating, subject);
+    row.addEventListener("click", () => {
+      const card = this.plugin.getCardByQid(entry.qid);
+      if (card)
+        void this.plugin.startPractice([card]);
+    });
+    return row;
+  }
+  practiceRandom() {
+    const cards = this.plugin.getCards();
+    if (cards.length === 0)
+      return;
+    const random = cards[Math.floor(Math.random() * cards.length)];
+    void this.plugin.startPractice([random]);
+  }
+};
+
 // src/template.ts
 var QUESTION_TEMPLATE = [
   "````zaptrace",
@@ -1859,253 +2312,714 @@ var QUESTION_TEMPLATE = [
   "````"
 ].join("\n");
 
+// src/view/libStatus.ts
+function isNeedsFix(card) {
+  return card.errors.length > 0 || card.duplicateId === true || card.stem.trim() === "" || card.answer.trim() === "";
+}
+function libStatus(card, state, today) {
+  if (isNeedsFix(card))
+    return "needsFix";
+  if (state?.due && state.due <= today)
+    return "due";
+  if ((state?.lapses ?? 0) > 0)
+    return "mistake";
+  if (!state || state.step === -1)
+    return "unlearned";
+  if (state.due)
+    return "planned";
+  return "normal";
+}
+function statusLabel(status) {
+  switch (status) {
+    case "needsFix":
+      return { text: "\u9700\u5B8C\u5584", cls: "is-fix" };
+    case "due":
+      return { text: "\u5230\u671F", cls: "is-due" };
+    case "mistake":
+      return { text: "\u9519\u9898", cls: "is-mistake" };
+    case "unlearned":
+      return { text: "\u672A\u7EC3", cls: "is-new" };
+    case "planned":
+      return { text: "\u5DF2\u6392\u671F", cls: "is-planned" };
+    default:
+      return { text: "\u5DF2\u638C\u63E1", cls: "is-planned" };
+  }
+}
+function dueLine(state, today) {
+  if (!state || !isValidDateString(state.due))
+    return "";
+  const due = state.due;
+  if (due < today)
+    return `\u5DF2\u5230\u671F ${Math.abs(diffDays(due, today))} \u5929`;
+  if (due === today)
+    return "\u4ECA\u5929\u5230\u671F";
+  return `\u590D\u4E60 ${due}`;
+}
+function statusCounts(cards, data, today) {
+  const counts = {
+    all: cards.length,
+    due: 0,
+    starred: 0,
+    unlearned: 0,
+    needsFix: 0,
+    mistake: 0
+  };
+  for (const card of cards) {
+    const state = data.questions[card.qid];
+    if (state?.due && state.due <= today)
+      counts.due++;
+    if (state?.star)
+      counts.starred++;
+    if (!state || state.step === -1)
+      counts.unlearned++;
+    if (isNeedsFix(card))
+      counts.needsFix++;
+    if ((state?.lapses ?? 0) > 0)
+      counts.mistake++;
+  }
+  return counts;
+}
+function todayAnswered(data, today) {
+  return data.reviewLog.filter((entry) => entry.at.slice(0, 10) === today).length;
+}
+function matchesStatus(card, state, filter, today) {
+  switch (filter) {
+    case "all":
+      return true;
+    case "due":
+      return Boolean(state?.due && state.due <= today);
+    case "starred":
+      return Boolean(state?.star);
+    case "unlearned":
+      return !state || state.step === -1;
+    case "needsFix":
+      return isNeedsFix(card);
+    case "mistake":
+      return (state?.lapses ?? 0) > 0;
+    default:
+      return true;
+  }
+}
+
 // src/view/libraryPanel.ts
-var LibraryPanel = class {
+var LibraryPage = class {
   constructor(host, plugin, ownerComponent) {
-    this.scope = null;
     this.filter = emptyFilter();
     this.sort = "due";
+    this.statusFilter = "all";
+    this.viewMode = "cards";
     this.searchInput = null;
     this.subjectSelect = null;
-    this.timeSelect = null;
     this.sortSelect = null;
-    this.tagsRow = null;
-    this.listEl = null;
     this.countEl = null;
+    this.statusWrap = null;
+    this.tagsWrap = null;
+    this.ctaButton = null;
+    this.segButtons = [];
+    this.cardsHost = null;
+    this.tableHost = null;
+    this.reviewHost = null;
+    this.panels = null;
+    this.entered = /* @__PURE__ */ new Set();
     this.host = host;
     this.plugin = plugin;
     this.ownerComponent = ownerComponent;
     this.build();
+    this.reviewPanel = new ReviewPanel(this.reviewHost, plugin, ownerComponent);
   }
-  /** 每轮刷新前卸载上一轮渲染作用域（当前行无 Markdown 渲染，仍统一生命周期）。 */
-  beginRender() {
-    if (this.scope) {
-      this.scope.unload();
-      this.scope = null;
-    }
-    this.scope = createRenderScope(this.ownerComponent, this.host);
-  }
+  /* ---------------- 骨架 ---------------- */
   build() {
-    const filters = document.createElement("div");
-    filters.className = "zt-filters";
+    const header = document.createElement("header");
+    header.className = "pd-lib-header";
+    const heading = document.createElement("h1");
+    heading.className = "pd-h1";
+    heading.textContent = "\u9898\u5E93";
+    const count = document.createElement("span");
+    count.className = "pd-count";
     const search = document.createElement("input");
     search.type = "search";
-    search.className = "zt-input zt-search";
-    search.placeholder = "\u641C\u7D22\u9898\u5E72 / \u6807\u7B7E";
+    search.className = "pd-search";
+    search.placeholder = "\u641C\u7D22\u9898\u5E72 / \u77E5\u8BC6\u70B9 / \u79D1\u76EE";
     search.setAttribute("aria-label", "\u641C\u7D22\u9898\u5E72\u6216\u6807\u7B7E");
     search.addEventListener("input", () => {
       this.filter.search = search.value;
-      this.renderList();
+      this.renderCards();
+      this.renderTable();
     });
+    const cta = document.createElement("button");
+    cta.type = "button";
+    cta.className = "pd-btn is-primary pd-cta";
+    cta.addEventListener("click", () => this.onCta());
+    const actions = document.createElement("div");
+    actions.className = "pd-header-actions";
+    createButton(actions, {
+      label: "",
+      icon: "refresh-cw",
+      ariaLabel: "\u91CD\u5EFA\u7D22\u5F15",
+      cls: "pd-icon-btn",
+      onClick: () => {
+        void this.plugin.rebuildIndex();
+      }
+    });
+    createButton(actions, {
+      label: "",
+      icon: "settings",
+      ariaLabel: "\u8BBE\u7F6E",
+      cls: "pd-icon-btn",
+      onClick: () => this.plugin.openSettings()
+    });
+    header.append(heading, count, search, cta, actions);
+    this.host.appendChild(header);
+    this.countEl = count;
     this.searchInput = search;
-    filters.appendChild(search);
-    this.subjectSelect = this.createSelect(filters, "\u79D1\u76EE", [
-      { value: "", label: "\u5168\u90E8\u79D1\u76EE" }
-    ], (value) => {
-      this.filter.subject = value === "" ? null : value;
-      this.renderList();
+    this.ctaButton = cta;
+    const statusbar = document.createElement("div");
+    statusbar.className = "pd-statusbar";
+    statusbar.setAttribute("role", "group");
+    statusbar.setAttribute("aria-label", "\u72B6\u6001\u7B5B\u9009");
+    this.host.appendChild(statusbar);
+    this.statusWrap = statusbar;
+    const filterbar = document.createElement("div");
+    filterbar.className = "pd-filterbar";
+    const subjectField = document.createElement("label");
+    subjectField.className = "pd-field";
+    const subjectLabel = document.createElement("span");
+    subjectLabel.className = "pd-label";
+    subjectLabel.textContent = "\u79D1\u76EE";
+    const subjectSelect = document.createElement("select");
+    subjectSelect.className = "pd-select";
+    subjectSelect.setAttribute("aria-label", "\u79D1\u76EE\u7B5B\u9009");
+    subjectSelect.addEventListener("change", () => {
+      this.filter.subject = subjectSelect.value === "" ? null : subjectSelect.value;
+      this.renderCards();
+      this.renderTable();
     });
-    this.timeSelect = this.createSelect(
-      filters,
-      "\u65F6\u95F4",
-      [
-        { value: "all", label: "\u5168\u90E8\u65F6\u95F4" },
-        { value: "today", label: "\u4ECA\u5929\u5230\u671F" },
-        { value: "overdue", label: "\u5DF2\u5230\u671F" },
-        { value: "week", label: "7 \u5929\u5185" },
-        { value: "unrated", label: "\u672A\u7EC3" }
-      ],
-      (value) => {
-        this.filter.time = value;
-        this.renderList();
-      }
-    );
-    this.sortSelect = this.createSelect(
-      filters,
-      "\u6392\u5E8F",
-      [
-        { value: "due", label: "\u6309\u5230\u671F" },
-        { value: "starred", label: "\u6536\u85CF\u4F18\u5148" },
-        { value: "recent", label: "\u6700\u8FD1\u65B0\u589E" },
-        { value: "subject", label: "\u6309\u79D1\u76EE" }
-      ],
-      (value) => {
-        this.sort = value;
-        this.renderList();
-      }
-    );
-    const pdfWrap = document.createElement("label");
-    pdfWrap.className = "zt-field zt-disabled";
-    const pdfLabel = document.createElement("span");
-    pdfLabel.className = "zt-field-label";
-    pdfLabel.textContent = "PDF \u6765\u6E90";
-    const pdfSelect = document.createElement("select");
-    pdfSelect.className = "zt-select";
-    pdfSelect.disabled = true;
-    pdfSelect.setAttribute("aria-disabled", "true");
-    const pdfOption = document.createElement("option");
-    pdfOption.textContent = "PDF \u6765\u6E90\uFF08\u9884\u7559\uFF09";
-    pdfSelect.appendChild(pdfOption);
-    pdfWrap.append(pdfLabel, pdfSelect);
-    filters.appendChild(pdfWrap);
-    createButton(filters, {
+    subjectField.append(subjectLabel, subjectSelect);
+    this.subjectSelect = subjectSelect;
+    const sortField = document.createElement("label");
+    sortField.className = "pd-field";
+    const sortLabel = document.createElement("span");
+    sortLabel.className = "pd-label";
+    sortLabel.textContent = "\u6392\u5E8F";
+    const sortSelect = document.createElement("select");
+    sortSelect.className = "pd-select";
+    sortSelect.setAttribute("aria-label", "\u6392\u5E8F");
+    for (const [value, label] of [
+      ["due", "\u6309\u5230\u671F"],
+      ["starred", "\u6536\u85CF\u4F18\u5148"],
+      ["recent", "\u6700\u8FD1\u65B0\u589E"],
+      ["subject", "\u6309\u79D1\u76EE"]
+    ]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      sortSelect.appendChild(option);
+    }
+    sortSelect.addEventListener("change", () => {
+      this.sort = sortSelect.value;
+      this.renderCards();
+      this.renderTable();
+    });
+    sortField.append(sortLabel, sortSelect);
+    this.sortSelect = sortSelect;
+    const tagsGroup = document.createElement("div");
+    tagsGroup.className = "pd-tagfilter";
+    tagsGroup.setAttribute("role", "group");
+    tagsGroup.setAttribute("aria-label", "\u6807\u7B7E\u7B5B\u9009");
+    this.tagsWrap = tagsGroup;
+    filterbar.append(subjectField, sortField, tagsGroup);
+    const clear = createButton(filterbar, {
       label: "\u6E05\u9664\u7B5B\u9009",
-      cls: "zt-button zt-button-ghost",
+      cls: "pd-btn",
       onClick: () => this.clearFilters()
     });
-    const summary = document.createElement("div");
-    summary.className = "zt-list-summary";
-    this.countEl = summary;
-    filters.appendChild(summary);
-    this.host.appendChild(filters);
-    const tagsRow = document.createElement("div");
-    tagsRow.className = "zt-tag-filter";
-    tagsRow.setAttribute("role", "group");
-    tagsRow.setAttribute("aria-label", "\u6807\u7B7E\u7B5B\u9009");
-    this.tagsRow = tagsRow;
-    this.host.appendChild(tagsRow);
-    const list = document.createElement("div");
-    list.className = "zt-list";
-    list.setAttribute("role", "list");
-    this.listEl = list;
-    this.host.appendChild(list);
+    clear.classList.add("pd-clear");
+    this.host.appendChild(filterbar);
+    const seg = document.createElement("div");
+    seg.className = "pd-seg";
+    seg.setAttribute("role", "tablist");
+    seg.setAttribute("aria-label", "\u89C6\u56FE");
+    const defs = [
+      ["cards", "\u9898\u5361\u6D41"],
+      ["table", "\u7D27\u51D1\u8868\u683C"],
+      ["review", "\u72EC\u7ACB\u590D\u4E60"]
+    ];
+    defs.forEach(([mode, label], index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "pd-seg-btn";
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(mode === this.viewMode));
+      button.setAttribute("aria-controls", `pd-panel-${mode}`);
+      button.id = `pd-tab-${mode}`;
+      button.textContent = label;
+      button.tabIndex = mode === this.viewMode ? 0 : -1;
+      button.addEventListener("click", () => this.setView(mode));
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+          return;
+        event.preventDefault();
+        const delta = event.key === "ArrowRight" ? 1 : -1;
+        const next = (index + delta + defs.length) % defs.length;
+        this.setView(defs[next][0]);
+        this.segButtons[next]?.focus();
+      });
+      seg.appendChild(button);
+      this.segButtons.push(button);
+    });
+    this.host.appendChild(seg);
+    const content = document.createElement("div");
+    content.className = "pd-content";
+    const cardsPanel = document.createElement("div");
+    cardsPanel.className = "pd-view";
+    cardsPanel.id = "pd-panel-cards";
+    cardsPanel.setAttribute("role", "tabpanel");
+    cardsPanel.setAttribute("aria-labelledby", "pd-tab-cards");
+    const gridHost = document.createElement("div");
+    gridHost.className = "pd-grid";
+    gridHost.setAttribute("role", "list");
+    cardsPanel.appendChild(gridHost);
+    const tablePanel = document.createElement("div");
+    tablePanel.className = "pd-view";
+    tablePanel.id = "pd-panel-table";
+    tablePanel.setAttribute("role", "tabpanel");
+    tablePanel.setAttribute("aria-labelledby", "pd-tab-table");
+    const reviewPanel = document.createElement("div");
+    reviewPanel.className = "pd-view";
+    reviewPanel.id = "pd-panel-review";
+    reviewPanel.setAttribute("role", "tabpanel");
+    reviewPanel.setAttribute("aria-labelledby", "pd-tab-review");
+    content.append(cardsPanel, tablePanel, reviewPanel);
+    this.host.appendChild(content);
+    this.cardsHost = gridHost;
+    this.tableHost = tablePanel;
+    this.reviewHost = reviewPanel;
+    this.panels = { cards: cardsPanel, table: tablePanel, review: reviewPanel };
   }
-  createSelect(parent, labelText, options, onChange) {
-    const wrap = document.createElement("label");
-    wrap.className = "zt-field";
-    const label = document.createElement("span");
-    label.className = "zt-field-label";
-    label.textContent = labelText;
-    const select = document.createElement("select");
-    select.className = "zt-select";
-    select.setAttribute("aria-label", labelText);
-    for (const option of options) {
-      const el = document.createElement("option");
-      el.value = option.value;
-      el.textContent = option.label;
-      select.appendChild(el);
-    }
-    select.addEventListener("change", () => onChange(select.value));
-    wrap.append(label, select);
-    parent.appendChild(wrap);
-    return select;
+  /* ---------------- 公共接口 ---------------- */
+  refresh() {
+    this.syncHeader();
+    this.renderStatusChips();
+    this.syncSubjectOptions();
+    this.renderTagChips();
+    this.renderCards();
+    this.renderTable();
+    if (this.viewMode === "review")
+      this.reviewPanel.refresh();
+    this.applyViewVisibility();
   }
   focusSearch() {
     this.searchInput?.focus();
   }
-  clearFilters() {
-    this.filter = emptyFilter();
-    if (this.searchInput)
-      this.searchInput.value = "";
-    if (this.subjectSelect)
-      this.subjectSelect.value = "";
-    if (this.timeSelect)
-      this.timeSelect.value = "all";
-    this.renderTags();
-    this.renderList();
+  setView(mode) {
+    this.viewMode = mode;
+    this.applyViewVisibility();
+    this.segButtons.forEach((button, index) => {
+      const key = ["cards", "table", "review"][index];
+      const selected = key === mode;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+    if (mode === "review")
+      this.reviewPanel.refresh();
   }
-  refresh() {
-    this.beginRender();
-    if (this.subjectSelect) {
-      const current = this.filter.subject ?? "";
-      clearElement(this.subjectSelect);
-      const all = document.createElement("option");
-      all.value = "";
-      all.textContent = "\u5168\u90E8\u79D1\u76EE";
-      this.subjectSelect.appendChild(all);
-      for (const subject of this.plugin.getCards().length > 0 ? this.collectSubjects() : []) {
-        const option = document.createElement("option");
-        option.value = subject;
-        option.textContent = subject;
-        this.subjectSelect.appendChild(option);
-      }
-      this.subjectSelect.value = current;
-      if (this.subjectSelect.value !== current)
-        this.filter.subject = null;
+  /* ---------------- 页头 / 状态 ---------------- */
+  syncHeader() {
+    const cards = this.plugin.getCards();
+    const today = this.plugin.today();
+    if (this.countEl)
+      this.countEl.textContent = `\u5168\u90E8\u9898\u76EE \xB7 ${cards.length} \u9898`;
+    const due = cards.filter((card) => {
+      const state = this.plugin.getState(card.qid);
+      return Boolean(state?.due && state.due <= today);
+    });
+    if (this.ctaButton) {
+      this.ctaButton.textContent = due.length > 0 ? `\u7EE7\u7EED\u4E0A\u6B21\u590D\u4E60 \xB7 \u4ECA\u65E5\u5DF2\u4F5C\u7B54 ${todayAnswered(this.plugin.data, today)} \u9898` : "\u968F\u673A\u7EC3\u4E00\u9898";
     }
-    this.renderTags();
-    this.renderList();
   }
-  collectSubjects() {
-    const set = /* @__PURE__ */ new Set();
-    for (const card of this.plugin.getCards())
-      set.add(card.subject);
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-  }
-  renderTags() {
-    const row = this.tagsRow;
-    if (!row)
+  onCta() {
+    const today = this.plugin.today();
+    const due = this.plugin.getCards().filter((card) => {
+      const state = this.plugin.getState(card.qid);
+      return Boolean(state?.due && state.due <= today);
+    }).sort((a, b) => {
+      const sa = this.plugin.getState(a.qid);
+      const sb = this.plugin.getState(b.qid);
+      const da = sa?.due ?? "";
+      const db = sb?.due ?? "";
+      if (da !== db)
+        return da < db ? -1 : 1;
+      return (sb?.lapses ?? 0) - (sa?.lapses ?? 0);
+    });
+    if (due.length > 0) {
+      void this.plugin.startPractice(due.slice(0, this.plugin.settings.dailyReviewLimit));
       return;
-    clearElement(row);
+    }
+    const cards = this.plugin.getCards();
+    if (cards.length === 0)
+      return;
+    void this.plugin.startPractice([cards[Math.floor(Math.random() * cards.length)]]);
+  }
+  renderStatusChips() {
+    const wrap = this.statusWrap;
+    if (!wrap)
+      return;
+    clearElement(wrap);
+    const cards = this.plugin.getCards();
+    const today = this.plugin.today();
+    const counts = statusCounts(cards, this.plugin.data, today);
+    const defs = [
+      { key: "all", label: "\u5168\u90E8\u9898\u76EE", count: counts.all },
+      { key: "due", label: "\u5230\u671F\u590D\u4E60", count: counts.due },
+      { key: "starred", label: "\u5DF2\u6536\u85CF", count: counts.starred },
+      { key: "unlearned", label: "\u672A\u7EC3", count: counts.unlearned },
+      { key: "needsFix", label: "\u9700\u5B8C\u5584", count: counts.needsFix },
+      { key: "mistake", label: "\u9519\u9898", count: counts.mistake }
+    ];
+    for (const def of defs) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "pd-chip";
+      chip.setAttribute("aria-pressed", String(this.statusFilter === def.key));
+      const label = document.createElement("span");
+      label.textContent = def.label;
+      const count = document.createElement("span");
+      count.className = "pd-chip-count";
+      count.textContent = String(def.count);
+      chip.append(label, count);
+      chip.addEventListener("click", () => {
+        this.statusFilter = this.statusFilter === def.key ? "all" : def.key;
+        this.renderStatusChips();
+        this.renderCards();
+        this.renderTable();
+      });
+      wrap.appendChild(chip);
+    }
+  }
+  syncSubjectOptions() {
+    const select = this.subjectSelect;
+    if (!select)
+      return;
+    const current = this.filter.subject ?? "";
+    clearElement(select);
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = "\u5168\u90E8\u79D1\u76EE";
+    select.appendChild(all);
+    const subjects = /* @__PURE__ */ new Set();
+    for (const card of this.plugin.getCards())
+      subjects.add(card.subject);
+    for (const subject of Array.from(subjects).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
+      const option = document.createElement("option");
+      option.value = subject;
+      option.textContent = subject;
+      select.appendChild(option);
+    }
+    select.value = current;
+    if (select.value !== current)
+      this.filter.subject = null;
+  }
+  renderTagChips() {
+    const wrap = this.tagsWrap;
+    if (!wrap)
+      return;
+    clearElement(wrap);
     const tags = /* @__PURE__ */ new Set();
     for (const card of this.plugin.getCards())
       for (const tag of card.tags)
         tags.add(tag);
-    const sorted = Array.from(tags).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-    if (sorted.length === 0)
-      return;
-    for (const tag of sorted) {
+    for (const tag of Array.from(tags).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
       const chip = document.createElement("button");
       chip.type = "button";
-      chip.className = "zt-chip";
+      chip.className = "pd-chip pd-chip-tag";
       chip.textContent = tag;
       const active = this.filter.tags.includes(tag);
       chip.setAttribute("aria-pressed", String(active));
-      if (active)
-        chip.classList.add("is-active");
       chip.addEventListener("click", () => {
-        if (this.filter.tags.includes(tag)) {
-          this.filter.tags = this.filter.tags.filter((item) => item !== tag);
-        } else {
-          this.filter.tags = [...this.filter.tags, tag];
-        }
-        this.renderTags();
-        this.renderList();
+        this.filter.tags = active ? this.filter.tags.filter((item) => item !== tag) : [...this.filter.tags, tag];
+        this.renderTagChips();
+        this.renderCards();
+        this.renderTable();
       });
-      row.appendChild(chip);
+      wrap.appendChild(chip);
     }
   }
-  renderList() {
-    const list = this.listEl;
-    if (!list)
-      return;
-    clearElement(list);
+  clearFilters() {
+    this.filter = emptyFilter();
+    this.statusFilter = "all";
+    this.sort = "due";
+    if (this.searchInput)
+      this.searchInput.value = "";
+    if (this.subjectSelect)
+      this.subjectSelect.value = "";
+    if (this.sortSelect)
+      this.sortSelect.value = "due";
+    this.renderStatusChips();
+    this.syncSubjectOptions();
+    this.renderTagChips();
+    this.renderCards();
+    this.renderTable();
+  }
+  /* ---------------- 数据 ---------------- */
+  computeFiltered() {
     const today = this.plugin.today();
+    const cards = this.plugin.getCards().filter((card) => matchesStatus(card, this.plugin.getState(card.qid), this.statusFilter, today));
+    const filtered = filterCards(cards, this.plugin.data, this.filter, today);
+    return sortCards(filtered, this.plugin.data, this.sort, today);
+  }
+  /* ---------------- 题卡流 ---------------- */
+  renderCards() {
+    const grid = this.cardsHost;
+    if (!grid)
+      return;
+    clearElement(grid);
     const all = this.plugin.getCards();
-    const filtered = filterCards(all, this.plugin.data, this.filter, today);
-    const sorted = sortCards(filtered, this.plugin.data, this.sort, today);
-    if (this.countEl) {
-      this.countEl.textContent = `${sorted.length} / ${all.length} \u9898`;
-    }
+    const cards = this.computeFiltered();
     if (all.length === 0) {
-      this.renderEmpty(list, "\u8FD8\u6CA1\u6709\u9898\u5361\u3002\u590D\u5236\u4E0B\u9762\u7684\u6A21\u677F\uFF0C\u7C98\u8FDB\u4EFB\u610F\u7B14\u8BB0\u3002", true);
+      this.renderEmpty(grid, "\u8FD8\u6CA1\u6709\u9898\u5361\u3002\u590D\u5236\u6A21\u677F\uFF0C\u7C98\u8FDB\u4EFB\u610F\u7B14\u8BB0\u3002", true);
       return;
     }
-    if (sorted.length === 0) {
-      this.renderEmpty(list, "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u9898\u3002", false);
+    if (cards.length === 0) {
+      this.renderEmpty(grid, "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u9898\u3002", false);
       return;
     }
-    for (const card of sorted) {
-      list.appendChild(this.buildRow(card, today));
+    let index = 0;
+    for (const card of cards) {
+      const isEnter = index < 5 && !this.entered.has(card.qid);
+      if (index < 5)
+        this.entered.add(card.qid);
+      index++;
+      grid.appendChild(this.buildQCard(card, isEnter));
     }
+  }
+  buildQCard(card, isEnter) {
+    const today = this.plugin.today();
+    const state = this.plugin.getState(card.qid);
+    const qcard = document.createElement("div");
+    qcard.className = "pd-qcard" + (isEnter ? " is-enter" : "");
+    qcard.dataset.qid = card.qid;
+    qcard.setAttribute("role", "listitem");
+    const main = document.createElement("div");
+    main.className = "pd-qcard-main";
+    main.setAttribute("role", "button");
+    main.tabIndex = 0;
+    const preview = toPreviewText(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
+    main.setAttribute("aria-label", `\u7EC3\u4E60\uFF1A${preview.slice(0, 30)}`);
+    const head = document.createElement("div");
+    head.className = "pd-qcard-head";
+    head.appendChild(this.buildTags(card));
+    main.appendChild(head);
+    const stem = document.createElement("div");
+    stem.className = "pd-qcard-stem";
+    stem.textContent = preview;
+    main.appendChild(stem);
+    const foot = document.createElement("div");
+    foot.className = "pd-qcard-foot";
+    const badge = statusLabel(libStatus(card, state, today));
+    const chip = document.createElement("span");
+    chip.className = `pd-status ${badge.cls}`;
+    chip.textContent = badge.text;
+    const due = document.createElement("span");
+    due.className = "pd-qcard-due";
+    due.textContent = dueLine(state, today);
+    const source = document.createElement("span");
+    source.className = "pd-qcard-source";
+    source.textContent = card.source ? `\u51FA\u5904\uFF1A${card.source}` : card.pdf ? "PDF" : "";
+    foot.append(chip, due, source);
+    main.appendChild(foot);
+    main.addEventListener("click", () => {
+      void this.plugin.startPractice([card]);
+    });
+    main.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        void this.plugin.startPractice([card]);
+      }
+    });
+    const tools = document.createElement("div");
+    tools.className = "pd-qcard-tools";
+    const detail = document.createElement("button");
+    detail.type = "button";
+    detail.className = "pd-qcard-detail";
+    detail.textContent = "\u67E5\u770B\u8BE6\u60C5";
+    detail.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void this.plugin.openSource(card);
+    });
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "pd-icon-btn";
+    more.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
+    more.setAttribute("aria-haspopup", "menu");
+    (0, import_obsidian7.setIcon)(more, "more-horizontal");
+    more.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.openCardMenu(more, card);
+    });
+    tools.append(detail, more);
+    qcard.append(main, tools);
+    return qcard;
+  }
+  /* ---------------- 紧凑表格 ---------------- */
+  renderTable() {
+    const host = this.tableHost;
+    if (!host)
+      return;
+    clearElement(host);
+    const all = this.plugin.getCards();
+    const cards = this.computeFiltered();
+    if (all.length === 0 || cards.length === 0) {
+      this.renderEmpty(host, all.length === 0 ? "\u8FD8\u6CA1\u6709\u9898\u5361\u3002" : "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u9898\u3002", all.length === 0);
+      return;
+    }
+    const table = document.createElement("div");
+    table.className = "pd-table";
+    table.setAttribute("role", "list");
+    const head = document.createElement("div");
+    head.className = "pd-thead";
+    for (const label of ["", "\u9898\u5E72", "\u79D1\u76EE", "\u6807\u7B7E", "\u72B6\u6001", "\u590D\u4E60", ""]) {
+      const cell = document.createElement("span");
+      cell.textContent = label;
+      head.appendChild(cell);
+    }
+    table.appendChild(head);
+    const today = this.plugin.today();
+    for (const card of cards)
+      table.appendChild(this.buildRow(card, today));
+    host.appendChild(table);
+  }
+  buildRow(card, today) {
+    const state = this.plugin.getState(card.qid);
+    const starred = state?.star ?? card.starInitial;
+    const row = document.createElement("div");
+    row.className = "pd-trow";
+    row.setAttribute("role", "listitem");
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = "pd-icon-btn pd-star" + (starred ? " is-active" : "");
+    star.setAttribute("aria-label", starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF");
+    star.setAttribute("aria-pressed", String(starred));
+    (0, import_obsidian7.setIcon)(star, "star");
+    star.addEventListener("click", () => {
+      const next = this.plugin.toggleStar(card.qid);
+      star.classList.toggle("is-active", next);
+      star.setAttribute("aria-pressed", String(next));
+      this.plugin.requestSave();
+      this.renderStatusChips();
+      this.renderCards();
+      this.renderTable();
+    });
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "pd-trow-main";
+    const title = document.createElement("span");
+    title.className = "pd-trow-title";
+    title.textContent = toPreviewText(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
+    main.appendChild(title);
+    main.addEventListener("click", () => {
+      void this.plugin.startPractice([card]);
+    });
+    const subject = document.createElement("span");
+    subject.className = "pd-trow-meta";
+    subject.textContent = card.subject;
+    const tags = document.createElement("span");
+    tags.className = "pd-trow-meta";
+    tags.textContent = card.tags.slice(0, 2).join(" \xB7 ");
+    const badge = statusLabel(libStatus(card, state, today));
+    const status = document.createElement("span");
+    status.className = `pd-status ${badge.cls}`;
+    status.textContent = badge.text;
+    const due = document.createElement("span");
+    due.className = "pd-trow-meta";
+    due.textContent = dueLine(state, today);
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "pd-icon-btn";
+    more.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
+    (0, import_obsidian7.setIcon)(more, "more-horizontal");
+    more.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.openCardMenu(more, card);
+    });
+    row.append(star, main, subject, tags, status, due, more);
+    return row;
+  }
+  /* ---------------- 菜单 / 标签 / 空态 ---------------- */
+  openCardMenu(anchor, card) {
+    const starred = this.plugin.getState(card.qid)?.star ?? card.starInitial;
+    openMenu(anchor, [
+      {
+        label: starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF",
+        icon: "star",
+        onSelect: () => {
+          this.plugin.toggleStar(card.qid);
+          this.plugin.requestSave();
+          this.renderStatusChips();
+          this.renderCards();
+          this.renderTable();
+        }
+      },
+      {
+        label: "\u6253\u5F00\u539F\u6587",
+        icon: "external-link",
+        onSelect: () => {
+          void this.plugin.openSource(card);
+        }
+      },
+      {
+        label: "\u590D\u5236\u9898\u5E72",
+        icon: "copy",
+        onSelect: () => {
+          void navigator.clipboard.writeText(card.stem);
+        }
+      }
+    ]);
+  }
+  buildTags(card) {
+    const tags = document.createElement("div");
+    tags.className = "pd-tags";
+    const subject = document.createElement("span");
+    subject.className = "pd-tag is-subject";
+    subject.textContent = card.subject || "\u672A\u5206\u7C7B";
+    tags.appendChild(subject);
+    const topics = card.tags.slice(0, 3);
+    for (const tag of topics) {
+      const chip = document.createElement("span");
+      chip.className = "pd-tag is-topic";
+      chip.textContent = tag;
+      tags.appendChild(chip);
+    }
+    if (card.tags.length > topics.length) {
+      const more = document.createElement("span");
+      more.className = "pd-tag is-topic";
+      more.textContent = `+${card.tags.length - topics.length}`;
+      tags.appendChild(more);
+    }
+    if (card.pdf) {
+      const pdf = document.createElement("span");
+      pdf.className = "pd-tag is-topic";
+      pdf.textContent = "PDF";
+      tags.appendChild(pdf);
+    }
+    return tags;
   }
   renderEmpty(container, message, showTemplate) {
     const empty = document.createElement("div");
-    empty.className = "zt-empty zt-empty-small";
+    empty.className = "pd-empty";
     const title = document.createElement("div");
-    title.className = "zt-empty-title";
+    title.className = "pd-empty-title";
     title.textContent = message;
     empty.appendChild(title);
     if (showTemplate) {
       createButton(empty, {
         label: "\u590D\u5236\u6A21\u677F",
-        cls: "zt-button zt-button-ghost",
+        cls: "pd-btn",
         onClick: () => {
           void navigator.clipboard.writeText(QUESTION_TEMPLATE);
         }
       });
       const details = document.createElement("details");
-      details.className = "zt-template-preview";
+      details.className = "pd-template-preview";
       const summary = document.createElement("summary");
       summary.textContent = "\u67E5\u770B\u6A21\u677F";
       const pre = document.createElement("pre");
@@ -2115,328 +3029,32 @@ var LibraryPanel = class {
     } else {
       createButton(empty, {
         label: "\u6E05\u9664\u7B5B\u9009",
-        cls: "zt-button zt-button-ghost",
+        cls: "pd-btn",
         onClick: () => this.clearFilters()
       });
     }
     container.appendChild(empty);
   }
-  buildRow(card, today) {
-    const row = document.createElement("div");
-    row.className = "zt-row";
-    row.dataset.qid = card.qid;
-    row.setAttribute("role", "listitem");
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "zt-row-open";
-    open.setAttribute("aria-label", `\u7EC3\u4E60\uFF1A${firstLine(card.stem)}`);
-    const title = document.createElement("span");
-    title.className = "zt-row-title";
-    title.textContent = firstLine(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
-    const meta = document.createElement("span");
-    meta.className = "zt-row-meta";
-    const parts = [card.subject, ...card.tags];
-    meta.textContent = parts.filter((part) => part).join(" \xB7 ");
-    const badge = document.createElement("span");
-    const state = this.plugin.getState(card.qid);
-    const due = dueBadge(state, today);
-    badge.className = `zt-badge zt-badge-${due.tone}`;
-    badge.textContent = due.text;
-    if (card.pdf) {
-      const pdf = document.createElement("span");
-      pdf.className = "zt-badge zt-badge-muted";
-      pdf.textContent = "PDF";
-      open.append(title, meta, pdf, badge);
-    } else {
-      open.append(title, meta, badge);
-    }
-    open.addEventListener("click", () => {
-      void this.plugin.startPractice([card]);
-    });
-    const star = document.createElement("button");
-    star.type = "button";
-    star.className = "zt-star zt-star-small";
-    const starred = state?.star ?? false;
-    star.setAttribute("aria-label", "\u6536\u85CF");
-    star.setAttribute("aria-pressed", String(starred));
-    if (starred)
-      star.classList.add("is-active");
-    (0, import_obsidian6.setIcon)(star, "star");
-    star.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const now = this.plugin.toggleStar(card.qid);
-      star.setAttribute("aria-pressed", String(now));
-      star.classList.toggle("is-active", now);
-      this.plugin.requestSave();
-      if (this.filter.starredOnly)
-        this.renderList();
-    });
-    if (card.duplicateId) {
-      const dup = document.createElement("span");
-      dup.className = "zt-badge zt-badge-danger";
-      dup.textContent = "\u91CD\u590D";
-      dup.title = card.errors.join("\uFF1B");
-      open.appendChild(dup);
-    }
-    const locate = document.createElement("button");
-    locate.type = "button";
-    locate.className = "zt-icon-button zt-row-locate";
-    locate.setAttribute("aria-label", "\u6253\u5F00\u539F\u6587");
-    locate.title = "\u6253\u5F00\u539F\u6587\u5E76\u5B9A\u4F4D\u5230\u9898\u5361\u884C";
-    (0, import_obsidian6.setIcon)(locate, "crosshair");
-    locate.addEventListener("click", (event) => {
-      event.stopPropagation();
-      void this.plugin.openSource(card);
-    });
-    row.append(open, locate, star);
-    return row;
-  }
-};
-
-// src/view/reviewPanel.ts
-var ReviewPanel = class {
-  constructor(host, plugin, ownerComponent) {
-    this.scope = null;
-    this.showWeekLog = false;
-    this.host = host;
-    this.plugin = plugin;
-    this.ownerComponent = ownerComponent;
-  }
-  /** 每轮刷新前卸载上一轮渲染作用域（统一 MarkdownRenderer 生命周期）。 */
-  beginRender() {
-    if (this.scope) {
-      this.scope.unload();
-      this.scope = null;
-    }
-    this.scope = createRenderScope(this.ownerComponent, this.host);
-  }
-  refresh() {
-    this.beginRender();
-    clearElement(this.host);
-    const today = this.plugin.today();
-    const cards = this.plugin.getCards();
-    const dueCards = cards.filter((card) => {
-      const state = this.plugin.getState(card.qid);
-      return Boolean(state && state.due && state.due <= today);
-    }).sort((a, b) => {
-      const sa = this.plugin.getState(a.qid);
-      const sb = this.plugin.getState(b.qid);
-      const da = sa?.due ?? "";
-      const db = sb?.due ?? "";
-      if (da !== db)
-        return da < db ? -1 : 1;
-      const la = sa?.lapses ?? 0;
-      const lb = sb?.lapses ?? 0;
-      if (la !== lb)
-        return lb - la;
-      return a.qid < b.qid ? -1 : 1;
-    });
-    this.renderHead(dueCards.length);
-    this.renderGroups(dueCards, today);
-    const divider = document.createElement("div");
-    divider.className = "zt-divider";
-    this.host.appendChild(divider);
-    this.renderLog(today);
-  }
-  renderHead(count) {
-    const head = document.createElement("div");
-    head.className = "zt-review-head";
-    const number = document.createElement("div");
-    number.className = "zt-review-count";
-    number.textContent = String(count);
-    const label = document.createElement("div");
-    label.className = "zt-review-label";
-    label.textContent = "\u4ECA\u65E5\u5230\u671F";
-    head.append(number, label);
-    const limit = this.plugin.settings.dailyReviewLimit;
-    if (count > limit) {
-      const more = document.createElement("div");
-      more.className = "zt-review-more";
-      more.textContent = `+${count - limit} \u987A\u5EF6\uFF08\u6BCF\u65E5\u4E0A\u9650 ${limit}\uFF09`;
-      head.appendChild(more);
-    }
-    createButton(head, {
-      label: "\u968F\u673A\u7EC3\u4E00\u9898",
-      cls: "zt-button zt-button-ghost",
-      onClick: () => this.practiceRandom()
-    });
-    this.host.appendChild(head);
-  }
-  renderGroups(dueCards, today) {
-    if (dueCards.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "zt-empty zt-empty-small";
-      const title = document.createElement("div");
-      title.className = "zt-empty-title";
-      title.textContent = "\u4ECA\u65E5\u65E0\u5230\u671F\uFF0C\u53BB\u7EC3\u4E00\u9898\uFF1F";
-      empty.appendChild(title);
-      createButton(empty, {
-        label: "\u968F\u673A\u7EC3\u4E00\u9898",
-        cls: "zt-button zt-button-ghost",
-        onClick: () => this.practiceRandom()
-      });
-      this.host.appendChild(empty);
+  applyViewVisibility() {
+    if (!this.panels)
       return;
+    for (const mode of ["cards", "table", "review"]) {
+      this.panels[mode].hidden = mode !== this.viewMode;
     }
-    const groups = /* @__PURE__ */ new Map();
-    for (const card of dueCards) {
-      const list = groups.get(card.subject);
-      if (list)
-        list.push(card);
-      else
-        groups.set(card.subject, [card]);
-    }
-    const limit = this.plugin.settings.dailyReviewLimit;
-    const subjects = Array.from(groups.keys()).sort(
-      (a, b) => a.localeCompare(b, "zh-Hans-CN")
-    );
-    for (const subject of subjects) {
-      const list = groups.get(subject) ?? [];
-      const group = document.createElement("div");
-      group.className = "zt-review-group";
-      const header = document.createElement("div");
-      header.className = "zt-group-head";
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "zt-group-toggle";
-      const controls = `zt-group-body-${subject.replace(/[^\w\u4e00-\u9fa5]/g, "")}`;
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.setAttribute("aria-controls", controls);
-      const name = document.createElement("span");
-      name.className = "zt-group-name";
-      name.textContent = subject;
-      const count = document.createElement("span");
-      count.className = "zt-group-count";
-      count.textContent = String(list.length);
-      toggle.append(name, count);
-      header.appendChild(toggle);
-      createButton(header, {
-        label: "\u5F00\u59CB\u7EC4\u5377",
-        cls: "zt-button zt-button-ghost zt-button-small",
-        onClick: () => {
-          const queue = list.slice(0, limit);
-          void this.plugin.startPractice(queue);
-        }
-      });
-      const body = document.createElement("div");
-      body.className = "zt-group-body";
-      body.id = controls;
-      body.hidden = true;
-      let filled = false;
-      toggle.addEventListener("click", () => {
-        const expanded = toggle.getAttribute("aria-expanded") === "true";
-        toggle.setAttribute("aria-expanded", String(!expanded));
-        body.hidden = expanded;
-        if (!expanded && !filled) {
-          filled = true;
-          for (const card of list) {
-            const row = document.createElement("button");
-            row.type = "button";
-            row.className = "zt-review-row";
-            const title = document.createElement("span");
-            title.className = "zt-row-title";
-            title.textContent = firstLine(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
-            const state = this.plugin.getState(card.qid);
-            const due = document.createElement("span");
-            due.className = "zt-badge zt-badge-danger";
-            due.textContent = state?.due ?? "";
-            row.append(title, due);
-            row.addEventListener("click", () => {
-              void this.plugin.startPractice([card]);
-            });
-            body.appendChild(row);
-          }
-        }
-      });
-      group.append(header, body);
-      this.host.appendChild(group);
-    }
-  }
-  renderLog(today) {
-    const wrap = document.createElement("div");
-    wrap.className = "zt-log";
-    const header = document.createElement("div");
-    header.className = "zt-log-head";
-    const title = document.createElement("div");
-    title.className = "zt-log-title";
-    title.textContent = "\u65F6\u95F4\u8BB0\u5F55";
-    header.appendChild(title);
-    createButton(header, {
-      label: this.showWeekLog ? "\u53EA\u770B\u4ECA\u5929" : "\u8FD1 7 \u5929",
-      cls: "zt-button zt-button-ghost zt-button-small",
-      onClick: () => {
-        this.showWeekLog = !this.showWeekLog;
-        this.refresh();
-      }
-    });
-    wrap.appendChild(header);
-    const from = this.showWeekLog ? addDays(today, -6) : today;
-    const entries = this.plugin.data.reviewLog.filter((entry) => {
-      const date = entry.at.slice(0, 10);
-      return date >= from && date <= today;
-    }).slice(-60).reverse();
-    if (entries.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "zt-empty zt-empty-tiny";
-      empty.textContent = "\u6682\u65E0\u7EC3\u4E60\u8BB0\u5F55\u3002";
-      wrap.appendChild(empty);
-      this.host.appendChild(wrap);
-      return;
-    }
-    let lastDate = "";
-    for (const entry of entries) {
-      const date = entry.at.slice(0, 10);
-      if (date !== lastDate) {
-        lastDate = date;
-        const dateLabel = document.createElement("div");
-        dateLabel.className = "zt-log-date";
-        dateLabel.textContent = date;
-        wrap.appendChild(dateLabel);
-      }
-      wrap.appendChild(this.buildLogRow(entry));
-    }
-    this.host.appendChild(wrap);
-  }
-  buildLogRow(entry) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "zt-log-row";
-    const time = document.createElement("span");
-    time.className = "zt-log-time";
-    time.textContent = entry.at.slice(11, 16);
-    const rating = document.createElement("span");
-    rating.className = `zt-log-rating zt-log-${entry.rating}`;
-    rating.textContent = RATING_LABELS[entry.rating];
-    const subject = document.createElement("span");
-    subject.className = "zt-log-subject";
-    subject.textContent = entry.subject;
-    row.append(time, rating, subject);
-    row.addEventListener("click", () => {
-      const card = this.plugin.getCardByQid(entry.qid);
-      if (card)
-        void this.plugin.startPractice([card]);
-    });
-    return row;
-  }
-  practiceRandom() {
-    const cards = this.plugin.getCards();
-    if (cards.length === 0)
-      return;
-    const random = cards[Math.floor(Math.random() * cards.length)];
-    void this.plugin.startPractice([random]);
   }
 };
 
 // src/view/workbenchView.ts
 var VIEW_TYPE_ZAPTRACE = "zaptrace-workbench";
-var ZaptraceView = class extends import_obsidian7.ItemView {
+var ZaptraceView = class extends import_obsidian8.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
-    this.badgeEl = null;
-    this.sections = null;
-    this.tabButtons = null;
-    this.activeTab = "practice";
+    this.drawer = null;
+    this.mask = null;
+    this.triggerEl = null;
     this.unregister = null;
+    this.drawerOpen = false;
+    this.resumeButton = null;
     this.plugin = plugin;
   }
   getViewType() {
@@ -2446,93 +3064,67 @@ var ZaptraceView = class extends import_obsidian7.ItemView {
     return "ZapTrace";
   }
   getIcon() {
-    return "graduation-cap";
+    return "library";
   }
   async onOpen() {
     const root = this.contentEl;
     clearElement(root);
-    root.classList.add("zaptrace-workbench");
+    root.classList.add("pd-root", "pd-workbench", "zaptrace-workbench");
     root.setAttribute("role", "region");
-    root.setAttribute("aria-label", "ZapTrace");
+    root.setAttribute("aria-label", "ZapTrace \u9898\u5E93");
     root.tabIndex = -1;
-    const topbar = document.createElement("header");
-    topbar.className = "zt-topbar";
-    const title = document.createElement("div");
-    title.className = "zt-title";
-    title.textContent = "ZapTrace";
-    const badge = document.createElement("span");
-    badge.className = "zt-topbar-badge";
-    badge.setAttribute("aria-live", "polite");
-    this.badgeEl = badge;
-    const actions = document.createElement("div");
-    actions.className = "zt-topbar-actions";
-    createButton(actions, {
-      label: "\u91CD\u5EFA\u7D22\u5F15",
-      cls: "zt-button zt-button-ghost zt-button-small",
-      icon: "refresh-cw",
-      onClick: () => {
-        void this.plugin.rebuildIndex();
-      }
+    const body = document.createElement("div");
+    body.className = "pd-lib-body";
+    const main = document.createElement("div");
+    main.className = "pd-lib-main";
+    body.appendChild(main);
+    const drawer = document.createElement("aside");
+    drawer.className = "pd-drawer";
+    drawer.setAttribute("role", "complementary");
+    drawer.setAttribute("aria-label", "\u7EC3\u4E60");
+    const drawerHead = document.createElement("div");
+    drawerHead.className = "pd-drawer-head";
+    const drawerTitle = document.createElement("h2");
+    drawerTitle.className = "pd-drawer-title";
+    drawerTitle.textContent = "\u7EC3\u4E60";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "pd-icon-btn";
+    closeBtn.setAttribute("aria-label", "\u5173\u95ED\u7EC3\u4E60");
+    (0, import_obsidian8.setIcon)(closeBtn, "x");
+    closeBtn.addEventListener("click", () => this.closeDrawer());
+    drawerHead.append(drawerTitle, closeBtn);
+    const drawerBody = document.createElement("div");
+    drawerBody.className = "pd-drawer-body";
+    drawer.append(drawerHead, drawerBody);
+    body.appendChild(drawer);
+    root.appendChild(body);
+    const mask = document.createElement("div");
+    mask.className = "pd-drawer-mask";
+    mask.addEventListener("click", () => this.closeDrawer());
+    root.appendChild(mask);
+    this.library = new LibraryPage(main, this.plugin, this);
+    this.practice = new PracticePanel(drawerBody, this.plugin, this);
+    this.drawer = drawer;
+    this.mask = mask;
+    const resume = document.createElement("button");
+    resume.type = "button";
+    resume.className = "pd-btn is-primary pd-resume";
+    resume.textContent = "\u7EE7\u7EED\u7EC3\u4E60";
+    resume.hidden = true;
+    resume.addEventListener("click", () => {
+      this.openDrawer();
+      this.practice.render();
     });
-    createButton(actions, {
-      label: "\u8BBE\u7F6E",
-      cls: "zt-button zt-button-ghost zt-button-small",
-      icon: "settings",
-      onClick: () => this.plugin.openSettings()
-    });
-    topbar.append(title, badge, actions);
-    root.appendChild(topbar);
-    const columns = document.createElement("div");
-    columns.className = "zt-columns";
-    const buildSection = (tab, heading) => {
-      const section = document.createElement("section");
-      section.className = `zt-panel zt-panel-${tab}`;
-      section.dataset.tab = tab;
-      const head = document.createElement("h2");
-      head.className = "zt-panel-title";
-      head.textContent = heading;
-      const body = document.createElement("div");
-      body.className = "zt-panel-body";
-      section.append(head, body);
-      columns.appendChild(section);
-      return body;
-    };
-    const practiceBody = buildSection("practice", "\u7EC3\u4E60");
-    const libraryBody = buildSection("library", "\u9898\u96C6");
-    const reviewBody = buildSection("review", "\u590D\u4E60");
-    root.appendChild(columns);
-    this.practice = new PracticePanel(practiceBody, this.plugin, this);
-    this.library = new LibraryPanel(libraryBody, this.plugin, this);
-    this.review = new ReviewPanel(reviewBody, this.plugin, this);
-    this.sections = {
-      practice: practiceBody.parentElement,
-      library: libraryBody.parentElement,
-      review: reviewBody.parentElement
-    };
-    const tabs = document.createElement("nav");
-    tabs.className = "zt-tabs";
-    tabs.setAttribute("role", "tablist");
-    const tabButtons = {};
-    const labels = [
-      ["practice", "\u7EC3\u4E60"],
-      ["library", "\u9898\u96C6"],
-      ["review", "\u590D\u4E60"]
-    ];
-    for (const [tab, label] of labels) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "zt-tab";
-      button.setAttribute("role", "tab");
-      button.setAttribute("aria-selected", String(tab === this.activeTab));
-      button.textContent = label;
-      button.addEventListener("click", () => this.setActiveTab(tab));
-      tabs.appendChild(button);
-      tabButtons[tab] = button;
-    }
-    this.tabButtons = tabButtons;
-    root.appendChild(tabs);
+    root.appendChild(resume);
+    this.resumeButton = resume;
     this.registerDomEvent(root, "keydown", (event) => {
-      if (this.practice.handleKeydown(event))
+      if (event.key === "Escape" && this.drawerOpen) {
+        event.preventDefault();
+        this.closeDrawer();
+        return;
+      }
+      if (this.drawerOpen && this.practice.handleKeydown(event))
         return;
       if (event.key === "/" && !this.isTypingTarget(event.target)) {
         event.preventDefault();
@@ -2540,45 +3132,67 @@ var ZaptraceView = class extends import_obsidian7.ItemView {
       }
     });
     this.unregister = this.plugin.registerWorkbench(this);
-    this.setActiveTab("practice");
     this.refreshAll();
   }
   async onClose() {
+    closeAllMenus();
     this.unregister?.();
     this.unregister = null;
     clearElement(this.contentEl);
   }
+  /* ---------------- WorkbenchHandle ---------------- */
   refreshAll() {
-    const today = this.plugin.today();
-    const dueCount = this.plugin.getCards().filter((card) => {
-      const state = this.plugin.getState(card.qid);
-      return Boolean(state && state.due && state.due <= today);
-    }).length;
-    if (this.badgeEl)
-      this.badgeEl.textContent = `\u4ECA\u65E5\u590D\u4E60 ${dueCount}`;
-    this.practice.render();
     this.library.refresh();
-    this.review.refresh();
+    this.practice.render();
   }
   startPractice(cards) {
     if (cards.length === 0)
       return;
-    this.setActiveTab("practice");
+    this.triggerEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.openDrawer();
     this.practice.start(cards);
-    this.contentEl.focus();
+    const first = this.drawer?.querySelector(
+      ".pd-practice-actions button, .pd-practice button"
+    );
+    first?.focus();
   }
   setActiveTab(tab) {
-    this.activeTab = tab;
-    if (this.sections) {
-      for (const key of Object.keys(this.sections)) {
-        this.sections[key].classList.toggle("is-active", key === tab);
-      }
+    if (tab === "practice") {
+      this.openDrawer();
+      return;
     }
-    if (this.tabButtons) {
-      for (const key of Object.keys(this.tabButtons)) {
-        this.tabButtons[key].setAttribute("aria-selected", String(key === tab));
-      }
+    this.library.setView(tab === "review" ? "review" : "cards");
+  }
+  /* ---------------- 抽屉 ---------------- */
+  openDrawer() {
+    this.drawerOpen = true;
+    this.contentEl.classList.add("is-drawer-open");
+    if (this.drawer) {
+      this.drawer.hidden = false;
+      const overlay = window.innerWidth < 1440;
+      this.drawer.setAttribute("role", overlay ? "dialog" : "complementary");
+      if (overlay)
+        this.drawer.setAttribute("aria-modal", "true");
+      else
+        this.drawer.removeAttribute("aria-modal");
     }
+    if (this.mask)
+      this.mask.hidden = false;
+    if (this.resumeButton)
+      this.resumeButton.hidden = true;
+  }
+  closeDrawer() {
+    this.drawerOpen = false;
+    this.contentEl.classList.remove("is-drawer-open");
+    if (this.drawer)
+      this.drawer.hidden = true;
+    if (this.mask)
+      this.mask.hidden = true;
+    if (this.resumeButton)
+      this.resumeButton.hidden = !this.practice.hasActiveSession;
+    if (this.triggerEl && this.triggerEl.isConnected)
+      this.triggerEl.focus();
+    this.triggerEl = null;
   }
   isTypingTarget(target) {
     if (!(target instanceof HTMLElement))
@@ -2589,7 +3203,7 @@ var ZaptraceView = class extends import_obsidian7.ItemView {
 };
 
 // src/main.ts
-var ZapTracePlugin = class extends import_obsidian8.Plugin {
+var ZapTracePlugin = class extends import_obsidian9.Plugin {
   constructor() {
     super(...arguments);
     this.index = emptyIndex();
@@ -2612,7 +3226,7 @@ var ZapTracePlugin = class extends import_obsidian8.Plugin {
     const result = await this.store.load();
     this.settings = this.store.data.settings;
     for (const issue of result.issues) {
-      new import_obsidian8.Notice(`ZapTrace: ${issue}`, 8e3);
+      new import_obsidian9.Notice(`ZapTrace: ${issue}`, 8e3);
     }
     this.registerView(VIEW_TYPE_ZAPTRACE, (leaf) => new ZaptraceView(leaf, this));
     this.applyTheme();
@@ -2675,6 +3289,7 @@ var ZapTracePlugin = class extends import_obsidian8.Plugin {
       this.rebuildTimer = null;
     }
     void this.store.flush();
+    document.body.classList.remove("zaptrace-force-dark");
     document.body.classList.remove("zaptrace-mubu-dark");
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_ZAPTRACE);
   }
@@ -2735,15 +3350,15 @@ var ZapTracePlugin = class extends import_obsidian8.Plugin {
    */
   async openSource(card) {
     const file = this.app.vault.getAbstractFileByPath(card.file);
-    if (!(file instanceof import_obsidian8.TFile)) {
-      new import_obsidian8.Notice(`ZapTrace: \u627E\u4E0D\u5230\u6E90\u6587\u4EF6 ${card.file}`);
+    if (!(file instanceof import_obsidian9.TFile)) {
+      new import_obsidian9.Notice(`ZapTrace: \u627E\u4E0D\u5230\u6E90\u6587\u4EF6 ${card.file}`);
       return;
     }
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.openFile(file, { eState: { line: card.line - 1 } });
     await this.app.workspace.revealLeaf(leaf);
     const view = leaf.view;
-    if (view instanceof import_obsidian8.MarkdownView) {
+    if (view instanceof import_obsidian9.MarkdownView) {
       view.setEphemeralState({ line: card.line - 1 });
       if (view.getMode() === "source") {
         view.editor.setCursor({ line: card.line - 1, ch: 0 });
@@ -2766,7 +3381,7 @@ var ZapTracePlugin = class extends import_obsidian8.Plugin {
   }
   applyTheme() {
     document.body.classList.toggle(
-      "zaptrace-mubu-dark",
+      "zaptrace-force-dark",
       this.settings.theme === "mubu-dark"
     );
   }
@@ -2816,7 +3431,7 @@ var ZapTracePlugin = class extends import_obsidian8.Plugin {
       this.refreshAll();
     } catch (error) {
       console.error("[ZapTrace] \u91CD\u5EFA\u7D22\u5F15\u5931\u8D25", error);
-      new import_obsidian8.Notice("ZapTrace: \u91CD\u5EFA\u7D22\u5F15\u5931\u8D25\uFF0C\u8BE6\u89C1\u63A7\u5236\u53F0");
+      new import_obsidian9.Notice("ZapTrace: \u91CD\u5EFA\u7D22\u5F15\u5931\u8D25\uFF0C\u8BE6\u89C1\u63A7\u5236\u53F0");
     } finally {
       this.rebuilding = false;
     }
@@ -2894,7 +3509,7 @@ ${orphanAfter}`;
       (card) => cursorLine >= card.line && cursorLine <= card.endLine
     );
     if (!located) {
-      new import_obsidian8.Notice("ZapTrace: \u5149\u6807\u4E0D\u5728 zaptrace \u9898\u5361\u5185");
+      new import_obsidian9.Notice("ZapTrace: \u5149\u6807\u4E0D\u5728 zaptrace \u9898\u5361\u5185");
       return;
     }
     const indexed = this.index.cards.find(
@@ -2905,7 +3520,7 @@ ${orphanAfter}`;
   randomPractice() {
     const cards = this.index.cards;
     if (cards.length === 0) {
-      new import_obsidian8.Notice("ZapTrace: \u8FD8\u6CA1\u6709\u53EF\u7EC3\u4E60\u7684\u9898\u5361");
+      new import_obsidian9.Notice("ZapTrace: \u8FD8\u6CA1\u6709\u53EF\u7EC3\u4E60\u7684\u9898\u5361");
       return;
     }
     const random = cards[Math.floor(Math.random() * cards.length)];

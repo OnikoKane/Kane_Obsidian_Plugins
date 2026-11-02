@@ -3,14 +3,16 @@ import { setIcon } from "obsidian";
 /**
  * 通用 DOM 小工具（视图层）。
  *
- * 注意（C7）：折块的 `id` 用自增序号，绝不直接用含 `:` / `.` 的 qid，
- * 避免 `querySelector` / `aria-controls` 的选择器转义坑；qid 只放 `data-qid`。
+ * C7：折块 id 用自增序号，绝不用含 `:` / `.` 的 qid。
+ * Quiet Cards：同时保留 `zt-collapse*` 行为钩子与 `pd-fold*` 视觉类（dual-class）。
  */
 
 let collapseSeq = 0;
 
 export interface CollapsibleOptions {
 	startsOpen?: boolean;
+	/** 右侧计数文案（如「3 行」） */
+	count?: string;
 	/** 首次展开时渲染内容（懒渲染，防偷看 + 省性能） */
 	onFirstOpen?: (content: HTMLElement) => void | Promise<void>;
 }
@@ -29,33 +31,39 @@ export function createCollapsible(
 	options: CollapsibleOptions = {}
 ): CollapsibleHandle {
 	const root = document.createElement("div");
-	root.className = "zt-collapse";
+	root.className = "zt-collapse pd-fold";
 	root.setAttribute("data-open", options.startsOpen ? "true" : "false");
 
 	const id = `zt-collapse-${++collapseSeq}`;
 
 	const header = document.createElement("button");
 	header.type = "button";
-	header.className = "zt-collapse-header";
+	header.className = "zt-collapse-header pd-fold-head";
 	header.setAttribute("aria-expanded", options.startsOpen ? "true" : "false");
 	header.setAttribute("aria-controls", id);
 
-	const dot = document.createElement("span");
-	dot.className = "zt-collapse-dot";
-	dot.setAttribute("aria-hidden", "true");
 	const chevron = document.createElement("span");
-	chevron.className = "zt-collapse-chevron";
+	chevron.className = "zt-collapse-chevron pd-fold-chevron";
 	chevron.setAttribute("aria-hidden", "true");
+	setIcon(chevron, "chevron-right");
+
 	const text = document.createElement("span");
-	text.className = "zt-collapse-label";
+	text.className = "zt-collapse-label pd-fold-label";
 	text.textContent = label;
-	header.append(dot, chevron, text);
+	header.append(chevron, text);
+
+	if (options.count) {
+		const count = document.createElement("span");
+		count.className = "pd-fold-count";
+		count.textContent = options.count;
+		header.appendChild(count);
+	}
 
 	const bodyWrap = document.createElement("div");
-	bodyWrap.className = "zt-collapse-body";
+	bodyWrap.className = "zt-collapse-body pd-fold-body";
 	bodyWrap.id = id;
 	const content = document.createElement("div");
-	content.className = "zt-collapse-inner";
+	content.className = "zt-collapse-inner pd-fold-content";
 	bodyWrap.appendChild(content);
 
 	root.append(header, bodyWrap);
@@ -96,7 +104,7 @@ export function createButton(
 ): HTMLButtonElement {
 	const button = document.createElement("button");
 	button.type = "button";
-	button.className = options.cls ?? "zt-button";
+	button.className = options.cls ?? "pd-btn";
 	if (options.icon) setIcon(button, options.icon);
 	if (options.ariaLabel) button.setAttribute("aria-label", options.ariaLabel);
 	if (options.label) {
@@ -114,7 +122,7 @@ export function createIconButton(
 	icon: string,
 	ariaLabel: string,
 	onClick: () => void,
-	cls = "zt-icon-button"
+	cls = "pd-icon-btn"
 ): HTMLButtonElement {
 	return createButton(parent, { label: "", icon, ariaLabel, onClick, cls });
 }

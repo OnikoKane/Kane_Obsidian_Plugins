@@ -2,18 +2,16 @@ import { Component, MarkdownRenderer, setIcon } from "obsidian";
 import type { PluginContext } from "./pluginContext.ts";
 import type { QuestionCard } from "../core/types.ts";
 import { createCollapsible, createButton } from "./dom.ts";
-import { firstLine } from "../core/format.ts";
+import { openMenu } from "./menu.ts";
+import { toPreviewText } from "./plainText.ts";
 
 export interface RenderCardOptions {
 	plugin: PluginContext;
 	card: QuestionCard;
 	host: HTMLElement;
-	/**
-	 * 本轮渲染的 owner（MarkdownRenderer 生命周期，REVIEW-implementation §3-①）：
-	 * 阅读视图传 `ctx.addChild(new RenderScope(el))`；工作台传该面板本轮的 scope。
-	 */
+	/** 渲染 owner（MarkdownRenderer 生命周期） */
 	owner: Component;
-	/** Live Preview 下的只读缩略卡 */
+	/** Live Preview 只读缩略卡 */
 	compact?: boolean;
 }
 
@@ -27,165 +25,202 @@ function renderMarkdown(
 	void MarkdownRenderer.render(plugin.app, text, el, sourcePath, owner);
 }
 
-function buildMeta(plugin: PluginContext, card: QuestionCard, host: HTMLElement): void {
-	const meta = document.createElement("div");
-	meta.className = "zt-card-meta";
+function lineCount(text: string): number {
+	return text.split(/\r?\n/).filter((line) => line.trim() !== "").length;
+}
+
+function buildTags(card: QuestionCard): HTMLElement {
+	const tags = document.createElement("div");
+	tags.className = "pd-tags";
 	const subject = document.createElement("span");
-	subject.className = "zt-card-subject";
-	subject.textContent = card.subject;
-	meta.appendChild(subject);
-	for (const tag of card.tags) {
+	subject.className = "pd-tag is-subject";
+	subject.textContent = card.subject || "未分类";
+	tags.appendChild(subject);
+	const topics = card.tags.slice(0, 3);
+	for (const tag of topics) {
 		const chip = document.createElement("span");
-		chip.className = "zt-tag";
+		chip.className = "pd-tag is-topic";
 		chip.textContent = tag;
-		meta.appendChild(chip);
+		tags.appendChild(chip);
 	}
-	if (card.duplicateId) {
-		const warn = document.createElement("span");
-		warn.className = "zt-badge zt-badge-danger";
-		warn.textContent = "重复已隔离";
-		meta.appendChild(warn);
+	if (card.tags.length > topics.length) {
+		const more = document.createElement("span");
+		more.className = "pd-tag is-topic";
+		more.textContent = `+${card.tags.length - topics.length}`;
+		tags.appendChild(more);
 	}
-	host.appendChild(meta);
+	return tags;
 }
 
-function buildStarButton(plugin: PluginContext, card: QuestionCard): HTMLButtonElement {
-	const state = plugin.getState(card.qid);
-	const starred = state ? state.star : card.starInitial;
+function buildCardMenuButton(plugin: PluginContext, card: QuestionCard): HTMLButtonElement {
 	const button = document.createElement("button");
 	button.type = "button";
-	button.className = "zt-star";
-	button.setAttribute("aria-label", "收藏");
-	button.setAttribute("aria-pressed", String(starred));
-	if (starred) button.classList.add("is-active");
-	setIcon(button, "star");
-	button.addEventListener("click", () => {
-		const now = plugin.toggleStar(card.qid);
-		button.setAttribute("aria-pressed", String(now));
-		button.classList.toggle("is-active", now);
-		plugin.requestSave();
-	});
-	return button;
-}
-
-function buildLocateButton(
-	plugin: PluginContext,
-	card: QuestionCard,
-	cls?: string
-): HTMLButtonElement {
-	const button = document.createElement("button");
-	button.type = "button";
-	button.className = cls ?? "zt-button zt-button-ghost zt-button-small";
-	button.setAttribute("aria-label", "定位原文");
-	setIcon(button, "crosshair");
-	const text = document.createElement("span");
-	text.textContent = "定位原文";
-	button.appendChild(text);
+	button.className = "pd-icon-btn pd-card-more";
+	button.dataset.tool = "more";
+	button.setAttribute("aria-label", "更多操作");
+	button.setAttribute("aria-haspopup", "menu");
+	setIcon(button, "more-horizontal");
 	button.addEventListener("click", (event) => {
 		event.stopPropagation();
-		void plugin.openSource(card);
+		const starred = plugin.getState(card.qid)?.star ?? card.starInitial;
+		openMenu(button, [
+			{
+				label: starred ? "取消收藏" : "收藏",
+				icon: "star",
+				onSelect: () => {
+					plugin.toggleStar(card.qid);
+					plugin.requestSave();
+				},
+			},
+			{
+				label: "打开原文",
+				icon: "external-link",
+				onSelect: () => {
+					void plugin.openSource(card);
+				},
+			},
+			{
+				label: "复制题干",
+				icon: "copy",
+				onSelect: () => {
+					void navigator.clipboard.writeText(card.stem);
+				},
+			},
+		]);
 	});
 	return button;
 }
 
-/** 阅读视图题卡（DESIGN §10.2）。答案与笔记默认折叠且懒渲染。 */
+/** 阅读视图 Quiet Card（DESIGN-v2 §4）。答案与笔记为 38px 扁平折叠行，懒渲染。 */
 export function renderQuestionCard(options: RenderCardOptions): HTMLElement {
 	const { plugin, card, host, owner, compact } = options;
 	const root = document.createElement("div");
-	root.className = "zt-card";
+	root.className = "pd-root pd-card zt-card";
 	root.dataset.qid = card.qid;
 	root.dataset.file = card.file;
 
 	if (compact) {
-		root.classList.add("zt-card-compact");
+		root.classList.add("pd-compact");
 		const title = document.createElement("div");
-		title.className = "zt-card-compact-title";
-		title.textContent = firstLine(card.stem) || "（空题干）";
+		title.className = "pd-compact-title";
+		title.textContent = toPreviewText(card.stem, 80) || "（空题干）";
 		const hint = document.createElement("div");
-		hint.className = "zt-card-compact-hint";
-		hint.textContent = "实时预览只读 · 在阅读视图或工作台作答评分";
+		hint.className = "pd-compact-hint";
+		hint.textContent = "实时预览只读 · 在阅读视图或工作台作答";
 		const actions = document.createElement("div");
-		actions.className = "zt-card-compact-actions";
+		actions.className = "pd-actions";
 		createButton(actions, {
 			label: "打开工作台练习",
-			cls: "zt-button",
+			cls: "pd-btn",
 			onClick: () => {
 				void plugin.startPractice([card]);
 			},
 		});
-		actions.appendChild(buildLocateButton(plugin, card));
+		createButton(actions, {
+			label: "定位原文",
+			cls: "pd-btn",
+			onClick: () => {
+				void plugin.openSource(card);
+			},
+		});
 		root.append(title, hint, actions);
 		host.appendChild(root);
 		return root;
 	}
 
-	// 头部：科目 + 标签 + Star
+	// 头部：标签 + hover 工具
 	const head = document.createElement("div");
-	head.className = "zt-card-head";
-	buildMeta(plugin, card, head);
-	head.appendChild(buildStarButton(plugin, card));
+	head.className = "pd-card-head";
+	head.appendChild(buildTags(card));
+	const tools = document.createElement("div");
+	tools.className = "pd-card-tools";
+	tools.appendChild(buildCardMenuButton(plugin, card));
+	head.appendChild(tools);
 	root.appendChild(head);
 
-	// 题干（始终可见）
+	// 题干
 	const stem = document.createElement("div");
-	stem.className = "zt-stem";
+	stem.className = "pd-stem pd-body";
 	renderMarkdown(plugin, card.stem, stem, card.file, owner);
 	root.appendChild(stem);
 
-	// 语法错误提示
+	// 语法/重复问题（红字无红底）
 	if (card.errors.length > 0) {
 		const errors = document.createElement("div");
-		errors.className = "zt-card-error";
+		errors.className = "pd-card-error";
 		errors.setAttribute("role", "status");
 		for (const message of card.errors) {
 			const line = document.createElement("div");
-			line.textContent = `⚠ ${message}`;
+			line.textContent = message;
 			errors.appendChild(line);
 		}
 		root.appendChild(errors);
 	}
 
-	// 答案（默认折叠，懒渲染；懒渲染复用同一 owner）
-	createCollapsible(root, "答案", {
+	// 三条 38px 扁平折叠行
+	const folds = document.createElement("div");
+	folds.className = "pd-folds";
+	root.appendChild(folds);
+
+	const answerLines = lineCount(card.answer);
+	createCollapsible(folds, "答案", {
+		count: answerLines > 0 ? `${answerLines} 行` : undefined,
 		onFirstOpen: (content) => {
 			if (card.answer.trim() === "") {
 				const missing = document.createElement("div");
-				missing.className = "zt-card-error";
-				missing.textContent = "⚠ 缺少答案分节";
+				missing.className = "pd-card-error";
+				missing.textContent = "缺少答案分节";
 				content.appendChild(missing);
 				return;
 			}
 			renderMarkdown(plugin, card.answer, content, card.file, owner);
 		},
 	});
-
 	if (card.notes.trim() !== "") {
-		createCollapsible(root, "个人笔记", {
+		createCollapsible(folds, "个人笔记", {
+			count: `${lineCount(card.notes)} 行`,
 			onFirstOpen: (content) => renderMarkdown(plugin, card.notes, content, card.file, owner),
 		});
 	}
 	if (card.aiNotes.trim() !== "") {
-		createCollapsible(root, "AI 笔记", {
+		createCollapsible(folds, "AI 笔记", {
+			count: `${lineCount(card.aiNotes)} 行`,
 			onFirstOpen: (content) => renderMarkdown(plugin, card.aiNotes, content, card.file, owner),
 		});
 	}
 
-	// 底部：出处 + 定位原文 + 练习
-	const footer = document.createElement("div");
-	footer.className = "zt-card-foot";
+	// 底部：出处 + 操作（同一基线）
+	const foot = document.createElement("div");
+	foot.className = "pd-card-foot";
 	const source = document.createElement("span");
-	source.className = "zt-card-source";
-	source.textContent = card.source ? `出处：${card.source}` : "";
-	footer.appendChild(source);
-	footer.appendChild(buildLocateButton(plugin, card));
-	createButton(footer, {
+	source.className = "pd-source";
+	if (card.source) {
+		const prefix = document.createElement("span");
+		prefix.className = "pd-source-prefix";
+		prefix.textContent = "出处：";
+		source.appendChild(prefix);
+		source.appendChild(document.createTextNode(card.source));
+		source.title = card.source;
+	}
+	foot.appendChild(source);
+	const actions = document.createElement("div");
+	actions.className = "pd-actions";
+	createButton(actions, {
+		label: "定位原文",
+		cls: "pd-btn",
+		onClick: () => {
+			void plugin.openSource(card);
+		},
+	});
+	createButton(actions, {
 		label: "练习此卡",
-		cls: "zt-button zt-button-ghost",
+		cls: "pd-btn is-primary",
 		onClick: () => {
 			void plugin.startPractice([card]);
 		},
 	});
-	root.appendChild(footer);
+	foot.appendChild(actions);
+	root.appendChild(foot);
 
 	host.appendChild(root);
 	return root;
