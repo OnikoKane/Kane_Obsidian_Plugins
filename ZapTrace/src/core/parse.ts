@@ -1,4 +1,4 @@
-import type { QuestionCard } from "./types.ts";
+import type { QuestionCard, QuestionOption, QuestionType } from "./types.ts";
 import { deriveQid, isValidExplicitId, stemHashOf } from "./id.ts";
 
 /**
@@ -17,7 +17,7 @@ const FENCE_OPEN_RE = /^ {0,3}(`{3,})[ \t]*zaptrace[ \t]*$/i;
 const FENCE_CLOSE_RE = /^ {0,3}(`{3,})[ \t]*$/;
 const KEY_VALUE_RE = /^([A-Za-z][A-Za-z0-9_-]*)[ \t]*:[ \t]*(.*)$/;
 /** 宽松分节标题：允许 ###/####、允许 标题前后空白（C1）。 */
-const SECTION_RE = /^\s*#{3,}\s*(题干|答案|个人笔记|AI\s*笔记)\s*$/;
+const SECTION_RE = /^\s*#{3,}\s*(题干|答案|AI\s*笔记|个人笔记|笔记)\s*$/;
 
 const KNOWN_KEYS = new Set([
 	"id",
@@ -27,8 +27,15 @@ const KNOWN_KEYS = new Set([
 	"source",
 	"star",
 	"difficulty",
+	"type",
+	"options",
+	"answer",
 	"pdf",
 ]);
+
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const JUDGE_TRUE_RE = /^(对|正确|真|是|true|t|√|yes|y|1)$/i;
+const JUDGE_FALSE_RE = /^(错|错误|假|否|false|f|×|x|no|n|0)$/i;
 
 export interface ParsedBlock {
 	card: QuestionCard | null;
@@ -73,6 +80,122 @@ function splitTags(raw: string): string[] {
 		}
 	}
 	return result;
+}
+
+/** 解析 `options: A. … | B. … | C. …`；无显式字母时按顺序自动标 A/B/C。 */
+export function parseOptions(raw: string): QuestionOption[] {
+	const parts = raw
+		.split(/[|｜]/)
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0);
+	const seen = new Set<string>();
+	const options: QuestionOption[] = [];
+	for (const part of parts) {
+		const match = part.match(/^([A-Za-z])[.、):：]\s*(.*)$/);
+		const label = (match ? match[1] : LETTERS[options.length] ?? String(options.length + 1)).toUpperCase();
+		const text = match ? match[2].trim() : part;
+		if (seen.has(label)) continue;
+		seen.add(label);
+		options.push({ label, text });
+	}
+	return options;
+}
+
+/** 判断题的固定选项。 */
+export function judgeOptions(): QuestionOption[] {
+	return [
+		{ label: "正确", text: "正确" },
+		{ label: "错误", text: "错误" },
+	];
+}
+
+/** 识别题型名（中英文），无法识别返回 null。 */
+export function parseTypeName(raw: string): QuestionType | null {
+	const value = raw.trim().toLowerCase().replace(/\s+/g, "");
+	if (value === "") return null;
+	if (["single", "radio", "单选", "单选题", "单项选择"].includes(value)) return "single";
+	if (["multiple", "multi", "checkbox", "多选", "多选题", "多项选择"].includes(value)) {
+		return "multiple";
+	}
+	if (["judge", "tf", "truefalse", "判断", "判断题", "对错", "对错题"].includes(value)) {
+		return "judge";
+	}
+	if (["short", "essay", "简答", "简答题", "问答", "问答型", "填空", "主观"].includes(value)) {
+		return "short";
+	}
+	return null;
+}
+
+/** 解析正确答案标识；供单选/多选/判断共用。 */
+export function parseCorrect(
+	raw: string,
+	type: QuestionType,
+	options: QuestionOption[]
+): string[] {
+	const value = raw.trim();
+	if (value === "") return [];
+	if (type === "judge") {
+		if (JUDGE_TRUE_RE.test(value)) return ["正确"];
+		if (JUDGE_FALSE_RE.test(value)) return ["错误"];
+		return [];
+	}
+	const labels = new Set(options.map((option) => option.label));
+	const parts = value
+		.split(/[,，、;；\s]+/)
+		.map((part) => part.trim().toUpperCase().replace(/[^A-Z0-9]/g, ""))
+		.filter((part) => part !== "");
+	const expanded = parts.flatMap((part) =>
+		part.length > 1 && /^[A-Z]+$/.test(part) ? part.split("") : [part]
+	);
+	const seen = new Set<string>();
+	const result: string[] = [];
+	for (const label of expanded) {
+		if (!labels.has(label) || seen.has(label)) continue;
+		seen.add(label);
+		result.push(label);
+	}
+	return result;
+}
+
+/** 题型 + 选项 + 答案：显式 type 优先，缺省按答案/选项推断。 */
+export function resolveQuestionShape(
+	rawType: string,
+	rawOptions: string,
+	rawAnswer: string
+): { type: QuestionType; options: QuestionOption[]; correct: string[] } {
+	const declared = parseTypeName(rawType);
+	const parsedOptions = parseOptions(rawOptions);
+	const answerParts = rawAnswer
+		.trim()
+		.split(/[,，、;；\s]+/)
+		.filter((part) => part !== "");
+
+	let type: QuestionType;
+	if (declared) {
+		type = declared;
+	} else if (parsedOptions.length >= 2) {
+		type = answerParts.length > 1 ? "multiple" : "single";
+	} else if (
+		JUDGE_TRUE_RE.test(rawAnswer.trim()) ||
+		JUDGE_FALSE_RE.test(rawAnswer.trim())
+	) {
+		type = "judge";
+	} else {
+		type = "short";
+	}
+
+	if (type === "judge") {
+		return { type, options: judgeOptions(), correct: parseCorrect(rawAnswer, "judge", []) };
+	}
+	if (type === "short") {
+		return { type, options: [], correct: [] };
+	}
+	const options = parsedOptions;
+	let correct = parseCorrect(rawAnswer, type, options);
+	// 单选却给了多个答案 → 按多选处理，避免 UI 只能选一个却有多项正确
+	if (type === "single" && correct.length > 1) type = "multiple";
+	if (type === "single") correct = correct.slice(0, 1);
+	return { type, options, correct };
 }
 
 interface HeaderSplit {
@@ -142,7 +265,7 @@ function splitSections(bodyLines: string[]): Sections {
 			const label = match[1].replace(/[ \t]+/g, "");
 			if (label === "题干") currentKey = "stem";
 			else if (label === "答案") currentKey = "answer";
-			else if (label === "个人笔记") currentKey = "notes";
+			else if (label === "个人笔记" || label === "笔记") currentKey = "notes";
 			else currentKey = "aiNotes";
 			continue;
 		}
@@ -230,6 +353,14 @@ export function parseBlockInner(
 		if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 5) difficulty = parsed;
 	}
 	const starRaw = headerMap.get("star")?.trim().toLowerCase() ?? "";
+	const shape = resolveQuestionShape(
+		headerMap.get("type") ?? "",
+		headerMap.get("options") ?? "",
+		headerMap.get("answer") ?? ""
+	);
+	if (shape.type !== "short" && shape.options.length < 2) {
+		errors.push(`第 ${startLine} 行：选择题/判断题缺少 options（至少 2 项）`);
+	}
 
 	const card: QuestionCard = {
 		// 索引键与状态键分离（H1）：key 唯一标识「某个文件里的某个块」，
@@ -244,6 +375,9 @@ export function parseBlockInner(
 		tags: splitTags(headerMap.get("tags") ?? ""),
 		source: headerMap.get("source")?.trim() ?? "",
 		difficulty,
+		type: shape.type,
+		options: shape.options,
+		correct: shape.correct,
 		pdf: headerMap.get("pdf")?.trim() ?? "",
 		extra,
 		starInitial: starRaw === "true",

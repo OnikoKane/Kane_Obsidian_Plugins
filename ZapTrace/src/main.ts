@@ -15,7 +15,7 @@ import { ensureQuestionFromCard, markOrphans } from "./core/state.ts";
 import { replacePersonalNotes } from "./core/notes.ts";
 import { patchCardMetadata } from "./core/metadata.ts";
 import { fixedTodayString, localIsoWithOffset, todayString } from "./core/date.ts";
-import type {
+import { withSubjectTags, type TagRename } from "./core/taxonomy.ts";import type {
 	QuestionCard,
 	QuestionState,
 	ZaptraceData,
@@ -89,9 +89,23 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 			id: "insert-card-template",
 			name: "插入题卡模板",
 			editorCallback: (editor: Editor) => {
-				editor.replaceSelection(`${QUESTION_TEMPLATE}\n`);
+				this.insertQuestionTemplate(editor);
 			},
 		});
+
+		// 编辑器右键菜单：插入题目（题材模板，可随后直接编辑源码）
+		this.registerEvent(
+			this.app.workspace.on("editor-menu", (menu, editor) => {
+				menu.addItem((item) =>
+					item
+						.setTitle("插入题目")
+						.setIcon("list-plus")
+						.onClick(() => {
+							this.insertQuestionTemplate(editor);
+						})
+				);
+			})
+		);
 
 		this.addCommand({
 			id: "random-practice",
@@ -200,6 +214,25 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 		this.requestSave();
 	}
 
+	/** 记住某题的笔记编辑框高度（px），下次渲染沿用到阅读卡与题库卡 */
+	setNoteHeight(qid: string, height: number): void {
+		const state = this.data.questions[qid];
+		if (!state) return;
+		const next = Math.min(480, Math.max(56, Math.round(height)));
+		if (state.noteHeight === next) return;
+		state.noteHeight = next;
+		this.requestSave();
+	}
+
+	/** 把标签编辑器里用到的标签并入「科目 > 子科目 > 小标签」库（不触发全量刷新）。 */
+	rememberTags(category: string, subject: string, tags: string[]): void {
+		if (this.store.readOnly || tags.length === 0) return;
+		const next = withSubjectTags(this.settings.taxonomy, category, subject, tags);
+		if (JSON.stringify(next) === JSON.stringify(this.settings.taxonomy)) return;
+		this.store.updateSettings({ ...this.settings, taxonomy: next });
+		this.settings = this.store.data.settings;
+	}
+
 	/**
 	 * 保存个人笔记：重新读取最新文件 → 重新定位块 → 只替换「### 个人笔记」节。
 	 * 绝不改答案/题干/其它块；失败不写盘。
@@ -286,8 +319,96 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 		return { ok: true, changed: true };
 	}
 
+	/** 小标签重命名后，批量改写对应题卡的头部 tags（只同步「科目 + 子科目」匹配的卡）。 */
+	async syncTagRenames(renames: TagRename[]): Promise<number> {
+		if (this.store.readOnly || renames.length === 0) return 0;
+		const byKey = new Map<string, string>();
+		for (const rename of renames) {
+			if (rename.from === rename.to) continue;
+			const category = rename.category || "数学";
+			byKey.set(`${category}\u0000${rename.subject}\u0000${rename.from}`, rename.to);
+		}
+		if (byKey.size === 0) return 0;
+
+		let updated = 0;
+		for (const card of [...this.index.cards]) {
+			const rawCategory = card.category ?? "";
+			const category = rawCategory || "数学";
+			let changed = false;
+			const tags = card.tags.map((tag) => {
+				const next = byKey.get(`${category}\u0000${card.subject}\u0000${tag}`);
+				if (next !== undefined && next !== tag) {
+					changed = true;
+					return next;
+				}
+				return tag;
+			});
+			if (!changed) continue;
+			const result = await this.saveMetadata(card, {
+				category: rawCategory,
+				subject: card.subject,
+				tags,
+			});
+			if (result.ok && result.changed) updated++;
+		}
+		if (updated > 0) this.refreshReadingViews();
+		return updated;
+	}
+
+	/**
+	 * 删除题目：从源文件移除整个 zaptrace 块（含题干/答案/笔记），不可恢复。
+	 * 练习记录保留在 data.json（标记为 orphaned），同题干重建后会自动接上。
+	 */
+	async deleteCard(card: QuestionCard): Promise<{ ok: boolean; error?: string }> {
+		if (this.store.readOnly) return { ok: false, error: "只读模式" };
+		const file = this.app.vault.getAbstractFileByPath(card.file);
+		if (!(file instanceof TFile)) return { ok: false, error: "找不到源文件" };
+		const confirmed = window.confirm(
+			"删除题目会从源文件移除整个题卡块（含题干/答案/笔记），不可恢复。继续？"
+		);
+		if (!confirmed) return { ok: true };
+		const fresh = await this.app.vault.read(file);
+		const scanned = scanZaptraceBlocks(card.file, fresh).cards;
+		let candidates = scanned.filter((item) => item.qid === card.qid || item.key === card.key);
+		if (candidates.length === 0) candidates = scanned.filter((item) => item.line === card.line);
+		if (candidates.length === 0) {
+			return { ok: false, error: "题卡已移动或删除，请刷新索引" };
+		}
+		const target = candidates.reduce((a, b) =>
+			Math.abs(a.line - card.line) <= Math.abs(b.line - card.line) ? a : b
+		);
+		// 逐行切分（保留每行自己的 EOL），删除 [开栏 .. 闭栏]
+		const parts = fresh.match(/[^\r\n]*\r?\n|[^\r\n]+/g) ?? [];
+		const startIdx = target.line - 1;
+		const endIdx = Math.min(target.endLine, parts.length);
+		if (startIdx < 0 || startIdx >= parts.length) {
+			return { ok: false, error: "题卡位置无效，请刷新索引后重试" };
+		}
+		const kept = [...parts.slice(0, startIdx), ...parts.slice(endIdx)];
+		// 前后都是空行时去掉一个，避免留出双倍空行
+		const isBlank = (value: string | undefined): boolean =>
+			value !== undefined && value.trim() === "";
+		if (isBlank(kept[startIdx - 1]) && isBlank(kept[startIdx])) {
+			kept.splice(startIdx, 1);
+		}
+		const content = kept.join("");
+		await this.app.vault.process(file, () => content);
+		await this.rebuildIndex();
+		this.refreshAll();
+		this.refreshReadingViews();
+		return { ok: true };
+	}
+
 	refreshAll(): void {
 		this.workbench?.refreshAll();
+	}
+
+	/** 在光标处插入题卡模板；光标不在行首时先补一个空行。 */
+	insertQuestionTemplate(editor: Editor): void {
+		const cursor = editor.getCursor();
+		const before = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
+		const prefix = before.trim() === "" ? "" : "\n";
+		editor.replaceSelection(`${prefix}${QUESTION_TEMPLATE}\n`);
 	}
 
 	async openWorkbench(): Promise<void> {
@@ -428,16 +549,26 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 		const taxonomy = this.settings.taxonomy;
 		if (taxonomy.seeded || taxonomy.categories.length > 0) return;
 		if (this.index.cards.length === 0) return;
-		const map = new Map<string, Set<string>>();
+		const map = new Map<string, Map<string, Set<string>>>();
 		for (const card of this.index.cards) {
 			const category = card.category || "数学";
-			const subjects = map.get(category) ?? new Set<string>();
-			if (card.subject) subjects.add(card.subject);
+			const subjects = map.get(category) ?? new Map<string, Set<string>>();
+			const subject = card.subject?.trim() ?? "";
+			if (subject !== "") {
+				const tags = subjects.get(subject) ?? new Set<string>();
+				for (const tag of card.tags) if (tag.trim() !== "") tags.add(tag.trim());
+				subjects.set(subject, tags);
+			}
 			map.set(category, subjects);
 		}
+		const sort = (items: string[]): string[] =>
+			items.sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 		const categories = [...map.entries()].map(([name, subjects]) => ({
 			name,
-			subjects: [...subjects].sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
+			subjects: sort([...subjects.keys()]),
+			subjectTags: Object.fromEntries(
+				[...subjects.entries()].map(([subject, tags]) => [subject, sort([...tags])])
+			),
 		}));
 		await this.saveSettings({
 			...this.settings,

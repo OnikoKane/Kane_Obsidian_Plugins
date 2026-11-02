@@ -17,6 +17,22 @@ export const RATING_LABELS: Record<Rating, string> = {
 	easy: "秒答",
 };
 
+/** 题型：简答（默认）/ 单选 / 多选 / 判断 */
+export type QuestionType = "short" | "single" | "multiple" | "judge";
+
+export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+	short: "简答",
+	single: "单选",
+	multiple: "多选",
+	judge: "判断",
+};
+
+export interface QuestionOption {
+	/** 选项标识：A/B/C…；判断题固定「正确」「错误」 */
+	label: string;
+	text: string;
+}
+
 /** 解析出来的一道题（派生数据，永远来自 Markdown，不落盘） */
 export interface QuestionCard {
 	/**
@@ -42,6 +58,12 @@ export interface QuestionCard {
 	tags: string[];
 	source: string;
 	difficulty: number | null;
+	/** 题型；缺省 short（简答） */
+	type: QuestionType;
+	/** 选择题选项（判断题固定两项），简答题为空 */
+	options: QuestionOption[];
+	/** 正确选项标识（单选 1 个、多选 1+ 个、判断 1 个） */
+	correct: string[];
 	/** PDF 来源预留字段，首版只展示不筛选 */
 	pdf: string;
 	/** 未识别的头部键，原样保留 */
@@ -89,10 +111,14 @@ export interface QuestionState {
 	lapses: number;
 	reviews: ReviewEntry[];
 	orphaned: boolean;
-	/** 个人笔记最后保存时间（本地 ISO）；无笔记/未保存过 → null */
+	/** 个人笔记最后保存时间（本地 ISO）；无笔记/未保存过 → null。null ⇔ 从未编辑过 */
 	notesUpdatedAt: string | null;
+	/** 最后一次练习时间（本地 ISO）；从未练习 → null。供每日时间轴/复习统计使用 */
+	lastPracticedAt: string | null;
 	/** 「答案与笔记」折叠是否展开；undefined = 未设置（阅读默认关、题库默认开） */
 	foldOpen?: boolean;
+	/** 笔记编辑框高度（px，用户手动拖拽后记住）；undefined = 使用默认高度 */
+	noteHeight?: number;
 }
 
 export type DateMode = "local" | "fixed";

@@ -7,6 +7,7 @@ import { toPreviewText } from "./plainText.ts";
 import { createNoteEditor } from "./noteEditor.ts";
 import { openTagPopover } from "./tagPopover.ts";
 import { playStarClick } from "./starSound.ts";
+import { answerKeyText, renderChoices } from "./choices.ts";
 
 export interface RenderCardOptions {
 	plugin: PluginContext;
@@ -32,7 +33,7 @@ function lineCount(text: string): number {
 	return text.split(/\r?\n/).filter((line) => line.trim() !== "").length;
 }
 
-function buildTags(card: QuestionCard): HTMLElement {
+function buildTags(plugin: PluginContext, card: QuestionCard): HTMLElement {
 	const tags = document.createElement("div");
 	tags.className = "pd-tags";
 	const category = document.createElement("span");
@@ -43,7 +44,7 @@ function buildTags(card: QuestionCard): HTMLElement {
 	subject.className = "pd-tag is-subject";
 	subject.textContent = card.subject || "未分类";
 	tags.appendChild(subject);
-	const topics = card.tags.slice(0, 2);
+	const topics = card.tags.slice(0, 3);
 	for (const tag of topics) {
 		const chip = document.createElement("span");
 		chip.className = "pd-tag is-topic";
@@ -56,6 +57,8 @@ function buildTags(card: QuestionCard): HTMLElement {
 		more.textContent = `+${card.tags.length - topics.length}`;
 		tags.appendChild(more);
 	}
+	// 标签编辑图标紧跟标签之后（与题库卡一致）
+	tags.appendChild(buildTagButton(plugin, card));
 	return tags;
 }
 
@@ -104,31 +107,30 @@ function buildMenuButton(plugin: PluginContext, card: QuestionCard): HTMLButtonE
 	setIcon(button, "more-horizontal");
 	button.addEventListener("click", (event) => {
 		event.stopPropagation();
-		const starred = plugin.getState(card.qid)?.star ?? card.starInitial;
-		openMenu(button, [
-			{
-				label: starred ? "取消收藏" : "收藏",
-				icon: "star",
-				onSelect: () => {
-					plugin.toggleStar(card.qid);
-					plugin.requestSave();
-				},
+	openMenu(button, [
+		{
+			label: "打开原文",
+			icon: "external-link",
+			onSelect: () => {
+				void plugin.openSource(card);
 			},
-			{
-				label: "打开原文",
-				icon: "external-link",
-				onSelect: () => {
-					void plugin.openSource(card);
-				},
+		},
+		{
+			label: "复制题干",
+			icon: "copy",
+			onSelect: () => {
+				void navigator.clipboard.writeText(card.stem);
 			},
-			{
-				label: "复制题干",
-				icon: "copy",
-				onSelect: () => {
-					void navigator.clipboard.writeText(card.stem);
-				},
+		},
+		{
+			label: "删除题目",
+			icon: "x",
+			danger: true,
+			onSelect: () => {
+				void plugin.deleteCard(card);
 			},
-		]);
+		},
+	]);
 	});
 	return button;
 }
@@ -170,17 +172,13 @@ export function renderQuestionCard(options: RenderCardOptions): HTMLElement {
 		return root;
 	}
 
-	// 头部：标签 + 常驻星标 + ⋯
+	// 头部：标签（含标签编辑图标）+ 右上角星标 / ⋯
 	const head = document.createElement("div");
 	head.className = "pd-card-head";
-	head.appendChild(buildTags(card));
+	head.appendChild(buildTags(plugin, card));
 	const tools = document.createElement("div");
 	tools.className = "pd-card-tools";
-	tools.append(
-		buildTagButton(plugin, card),
-		buildStarButton(plugin, card),
-		buildMenuButton(plugin, card)
-	);
+	tools.append(buildStarButton(plugin, card), buildMenuButton(plugin, card));
 	head.appendChild(tools);
 	root.appendChild(head);
 
@@ -189,6 +187,17 @@ export function renderQuestionCard(options: RenderCardOptions): HTMLElement {
 	stem.className = "pd-stem pd-body";
 	renderMarkdown(plugin, card.stem, stem, card.file, owner);
 	root.appendChild(stem);
+
+	// 单选 / 多选 / 判断：选项 UI + 提交答案（提交后染色并展开答案）
+	const state = plugin.getState(card.qid);
+	const choices = renderChoices(card, {
+		onSubmit: () => {
+			choices?.mark();
+			choices?.lock();
+			merged.setOpen(true);
+		},
+	});
+	if (choices) root.appendChild(choices.root);
 
 	if (card.errors.length > 0) {
 		const errors = document.createElement("div");
@@ -203,7 +212,6 @@ export function renderQuestionCard(options: RenderCardOptions): HTMLElement {
 	}
 
 	// 合并折叠：答案与笔记
-	const state = plugin.getState(card.qid);
 	const answerLines = lineCount(card.answer);
 	const noteLines = lineCount(card.notes);
 	const meta =
@@ -215,9 +223,18 @@ export function renderQuestionCard(options: RenderCardOptions): HTMLElement {
 	const merged = createCollapsible(folds, "答案与笔记", {
 		count: meta,
 		startsOpen: state?.foldOpen ?? false,
-		onToggle: (open) => plugin.setFoldOpen(card.qid, open),
+		onToggle: (open) => {
+			plugin.setFoldOpen(card.qid, open);
+		},
 		onFirstOpen: (content) => {
 			content.dataset.fold = "answer-notes";
+			const keyText = answerKeyText(card);
+			if (keyText !== "") {
+				const key = document.createElement("div");
+				key.className = "pd-answer-key";
+				key.textContent = keyText;
+				content.appendChild(key);
+			}
 			const answer = document.createElement("div");
 			answer.className = "pd-answer-render pd-body";
 			if (card.answer.trim() === "") {
@@ -227,6 +244,8 @@ export function renderQuestionCard(options: RenderCardOptions): HTMLElement {
 				renderMarkdown(plugin, card.answer, answer, card.file, owner);
 			}
 			content.appendChild(answer);
+			// 只有作答过才染色，避免未作答时直接泄露正确项
+			if (choices && choices.selection().length > 0) choices.mark();
 			content.appendChild(createNoteEditor(plugin, card, content));
 		},
 	});

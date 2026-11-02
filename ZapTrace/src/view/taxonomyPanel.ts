@@ -1,6 +1,7 @@
-import { App, Modal } from "obsidian";
+import { App, Modal, Notice } from "obsidian";
 import type { PluginContext } from "./pluginContext.ts";
 import type { TaxonomyCategory, TaxonomyConfig } from "../core/taxonomy.ts";
+import { normalizeTaxonomy } from "../core/taxonomy.ts";
 
 /** 分类设置面板（DESIGN-v3.2 §1.3）：草稿编辑，保存才写入 settings.taxonomy。 */
 
@@ -16,6 +17,8 @@ class TaxonomyModal extends Modal {
 	private saveBtn!: HTMLButtonElement;
 	private saved = false;
 	private readOnly = false;
+	/** 本次草稿里的小标签重命名（保存时同步改写题卡） */
+	private renames: Array<{ category: string; subject: string; from: string; to: string }> = [];
 
 	constructor(app: App, plugin: PluginContext) {
 		super(app);
@@ -27,14 +30,16 @@ class TaxonomyModal extends Modal {
 		this.contentEl.addClass("pd-modal");
 		this.contentEl.empty();
 		this.readOnly = this.plugin.isReadOnly();
-		this.draft = JSON.parse(JSON.stringify(this.plugin.settings.taxonomy.categories)) as TaxonomyCategory[];
+		this.draft = normalizeTaxonomy(
+			JSON.parse(JSON.stringify(this.plugin.settings.taxonomy)) as unknown
+		).categories;
 
 		const title = document.createElement("h2");
 		title.className = "pd-modal-title";
 		title.textContent = "分类设置";
 		const sub = document.createElement("p");
 		sub.className = "pd-modal-sub";
-		sub.textContent = "管理大科目与子科目；只影响选择器，不改写已有题卡。";
+		sub.textContent = "管理科目 > 子科目 > 小标签；只影响选择器，不改写已有题卡。";
 		this.contentEl.append(title, sub);
 
 		this.container = document.createElement("div");
@@ -45,8 +50,8 @@ class TaxonomyModal extends Modal {
 		addCategoryRow.className = "pd-taxonomy-add";
 		const categoryInput = document.createElement("input");
 		categoryInput.className = "pd-modal-input";
-		categoryInput.placeholder = "新增大科目";
-		categoryInput.setAttribute("aria-label", "新增大科目");
+		categoryInput.placeholder = "新增科目";
+		categoryInput.setAttribute("aria-label", "新增科目");
 		const addCategory = document.createElement("button");
 		addCategory.type = "button";
 		addCategory.className = "pd-btn";
@@ -73,6 +78,7 @@ class TaxonomyModal extends Modal {
 			const configuredCats = new Set(this.draft.map((item) => item.name));
 			const unconfiguredCats = new Set<string>();
 			const unconfiguredSubjects = new Map<string, Set<string>>();
+			const unconfiguredTags = new Map<string, { cat: string; subject: string; tags: Set<string> }>();
 			for (const card of this.plugin.getCards()) {
 				const cat = card.category || "数学";
 				if (!configuredCats.has(cat)) unconfiguredCats.add(cat);
@@ -82,8 +88,28 @@ class TaxonomyModal extends Modal {
 					set.add(card.subject);
 					unconfiguredSubjects.set(cat, set);
 				}
+				// 科目与子科目都已配置，但小标签还没进库 → 提供“加入”建议
+				if (target && card.subject && target.subjects.includes(card.subject)) {
+					const known = new Set(target.subjectTags[card.subject] ?? []);
+					const key = `${cat}\u0000${card.subject}`;
+					const entry = unconfiguredTags.get(key) ?? {
+						cat,
+						subject: card.subject,
+						tags: new Set<string>(),
+					};
+					for (const tag of card.tags) {
+						if (tag.trim() !== "" && !known.has(tag)) entry.tags.add(tag);
+					}
+					if (entry.tags.size > 0) unconfiguredTags.set(key, entry);
+				}
 			}
-			if (unconfiguredCats.size === 0 && unconfiguredSubjects.size === 0) return;
+			if (
+				unconfiguredCats.size === 0 &&
+				unconfiguredSubjects.size === 0 &&
+				unconfiguredTags.size === 0
+			) {
+				return;
+			}
 			const label = document.createElement("div");
 			label.className = "pd-form-hint";
 			label.textContent = "题卡中出现但未配置：";
@@ -108,6 +134,22 @@ class TaxonomyModal extends Modal {
 					button.addEventListener("click", () => {
 						const target = this.draft.find((item) => item.name === cat);
 						if (target && !target.subjects.includes(subject)) target.subjects.push(subject);
+						this.renderAll();
+					});
+					suggestions.appendChild(button);
+				}
+			}
+			for (const entry of unconfiguredTags.values()) {
+				const target = this.draft.find((item) => item.name === entry.cat);
+				if (!target) continue;
+				for (const tag of entry.tags) {
+					const button = document.createElement("button");
+					button.type = "button";
+					button.className = "pd-chip pd-chip-tag";
+					button.textContent = `${entry.cat} · ${entry.subject} · ${tag}`;
+					button.addEventListener("click", () => {
+						const list = target.subjectTags[entry.subject] ?? [];
+						if (!list.includes(tag)) target.subjectTags[entry.subject] = [...list, tag];
 						this.renderAll();
 					});
 					suggestions.appendChild(button);
@@ -151,7 +193,7 @@ class TaxonomyModal extends Modal {
 		if (this.draft.length === 0) {
 			const empty = document.createElement("div");
 			empty.className = "pd-empty pd-empty-small";
-			empty.textContent = "还没有大科目。添加一个，或从下方「未配置」加入。";
+			empty.textContent = "还没有科目。添加一个，或从下方「未配置」加入。";
 			this.container.appendChild(empty);
 		}
 		for (const category of this.draft) {
@@ -180,24 +222,10 @@ class TaxonomyModal extends Modal {
 			subjectRow.className = "pd-taxonomy-subjects";
 			const label = document.createElement("span");
 			label.className = "pd-form-hint";
-			label.textContent = "子科目：";
+			label.textContent = "子科目 / 小标签：";
 			subjectRow.appendChild(label);
 			for (const subject of category.subjects) {
-				const chip = document.createElement("span");
-				chip.className = "pd-tag is-topic pd-tag-selected-chip";
-				const text = document.createElement("span");
-				text.textContent = subject;
-				const removeSubject = document.createElement("button");
-				removeSubject.type = "button";
-				removeSubject.className = "pd-tag-remove";
-				removeSubject.setAttribute("aria-label", `移除子科目 ${subject}`);
-				removeSubject.textContent = "×";
-				removeSubject.addEventListener("click", () => {
-					category.subjects = category.subjects.filter((item) => item !== subject);
-					this.renderAll();
-				});
-				chip.append(text, removeSubject);
-				subjectRow.appendChild(chip);
+				subjectRow.appendChild(this.buildSubjectRow(category, subject));
 			}
 			const input = document.createElement("input");
 			input.className = "pd-modal-input pd-taxonomy-subject-input";
@@ -233,6 +261,177 @@ class TaxonomyModal extends Modal {
 		}
 	}
 
+	/** 一个子科目一行：子科目 chip + 它的小标签 + 内联新增输入。 */
+	private buildSubjectRow(category: TaxonomyCategory, subject: string): HTMLElement {
+		const row = document.createElement("div");
+		row.className = "pd-taxonomy-subject";
+
+		const chip = document.createElement("span");
+		chip.className = "pd-tag is-subject pd-tag-selected-chip pd-taxonomy-subject-chip";
+		const text = document.createElement("span");
+		text.textContent = subject;
+		const removeSubject = document.createElement("button");
+		removeSubject.type = "button";
+		removeSubject.className = "pd-tag-remove";
+		removeSubject.setAttribute("aria-label", `移除子科目 ${subject}`);
+		removeSubject.textContent = "×";
+		removeSubject.addEventListener("click", () => {
+			category.subjects = category.subjects.filter((item) => item !== subject);
+			delete category.subjectTags[subject];
+			this.renderAll();
+		});
+		chip.append(text, removeSubject);
+		row.appendChild(chip);
+
+		const tags = category.subjectTags[subject] ?? [];
+		for (const tag of tags) {
+			const tagChip = document.createElement("span");
+			tagChip.className = "pd-tag is-topic pd-tag-selected-chip";
+			// 点标签名即可重命名；保存后同步改写题卡头部 tags
+			const tagText = document.createElement("span");
+			tagText.className = "pd-tag-name";
+			tagText.setAttribute("role", "button");
+			tagText.tabIndex = 0;
+			tagText.textContent = tag;
+			const beginEdit = (): void => this.editSubjectTag(tagChip, category, subject, tag);
+			tagText.addEventListener("click", beginEdit);
+			tagText.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					beginEdit();
+				}
+			});
+			const removeTag = document.createElement("button");
+			removeTag.type = "button";
+			removeTag.className = "pd-tag-remove";
+			removeTag.setAttribute("aria-label", `移除小标签 ${tag}`);
+			removeTag.textContent = "×";
+			removeTag.addEventListener("click", () => {
+				category.subjectTags[subject] = tags.filter((item) => item !== tag);
+				this.renderAll();
+			});
+			tagChip.append(tagText, removeTag);
+			row.appendChild(tagChip);
+		}
+
+		const addChip = document.createElement("button");
+		addChip.type = "button";
+		addChip.className = "pd-tag-add";
+		addChip.textContent = "+ 添加小标签";
+		addChip.disabled = this.readOnly;
+		addChip.addEventListener("click", () =>
+			this.beginAddSubjectTag(row, addChip, category, subject)
+		);
+		row.appendChild(addChip);
+		return row;
+	}
+
+	/** 虚线「+ 添加小标签」→ 就地展开输入框；Enter/失焦提交，Esc 取消。 */
+	private beginAddSubjectTag(
+		row: HTMLElement,
+		chip: HTMLElement,
+		category: TaxonomyCategory,
+		subject: string
+	): void {
+		const input = document.createElement("input");
+		input.className = "pd-modal-input pd-tag-add-input";
+		input.placeholder = "新小标签";
+		input.setAttribute("aria-label", `为 ${category.name} · ${subject} 添加小标签`);
+		chip.hidden = true;
+		row.insertBefore(input, chip);
+		input.focus();
+		let finished = false;
+		const commit = (save: boolean): void => {
+			if (finished) return;
+			finished = true;
+			const value = input.value.trim();
+			if (save && value !== "") {
+				const list = category.subjectTags[subject] ?? [];
+				if (list.includes(value)) {
+					this.setError("该小标签已存在");
+					this.renderAll();
+					return;
+				}
+				category.subjectTags[subject] = [...list, value];
+				this.setError("");
+			}
+			this.renderAll();
+		};
+		input.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				commit(true);
+			} else if (event.key === "Escape") {
+				event.preventDefault();
+				commit(false);
+			}
+		});
+		input.addEventListener("blur", () => commit(true));
+	}
+
+	/** 把小标签 chip 就地变成输入框；Enter/失焦提交，Esc 取消。 */
+	private editSubjectTag(
+		chip: HTMLElement,
+		category: TaxonomyCategory,
+		subject: string,
+		oldName: string
+	): void {
+		const input = document.createElement("input");
+		input.className = "pd-modal-input pd-taxonomy-tag-input pd-tag-inline-input";
+		input.value = oldName;
+		input.setAttribute("aria-label", `重命名小标签 ${oldName}`);
+		chip.textContent = "";
+		chip.appendChild(input);
+		input.focus();
+		input.select();
+		let finished = false;
+		const commit = (save: boolean): void => {
+			if (finished) return;
+			finished = true;
+			const value = input.value.trim();
+			if (!save || value === "" || value === oldName) {
+				this.renderAll();
+				return;
+			}
+			const list = category.subjectTags[subject] ?? [];
+			if (list.includes(value)) {
+				this.setError("该小标签已存在");
+				this.renderAll();
+				return;
+			}
+			category.subjectTags[subject] = list.map((tag) => (tag === oldName ? value : tag));
+			this.recordRename(category.name, subject, oldName, value);
+			this.setError("");
+			this.renderAll();
+		};
+		input.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				commit(true);
+			} else if (event.key === "Escape") {
+				event.preventDefault();
+				commit(false);
+			}
+		});
+		input.addEventListener("blur", () => commit(true));
+	}
+
+	/** 合并连续重命名（A→B→C 记为 A→C；改回原名则移除）。 */
+	private recordRename(category: string, subject: string, from: string, to: string): void {
+		const existing = this.renames.find(
+			(rename) => rename.category === category && rename.subject === subject && rename.to === from
+		);
+		if (existing) {
+			if (existing.from === to) {
+				this.renames = this.renames.filter((rename) => rename !== existing);
+			} else {
+				existing.to = to;
+			}
+			return;
+		}
+		this.renames.push({ category, subject, from, to });
+	}
+
 	private renderAll(): void {
 		this.renderList();
 		this.renderSuggestions();
@@ -242,14 +441,14 @@ class TaxonomyModal extends Modal {
 	private addCategory(raw: string): void {
 		const name = raw.trim();
 		if (name === "") {
-			this.setError("大科目名称不能为空");
+			this.setError("科目名称不能为空");
 			return;
 		}
 		if (this.draft.some((item) => item.name === name)) {
-			this.setError("该大科目已存在");
+			this.setError("该科目已存在");
 			return;
 		}
-		this.draft.push({ name, subjects: [] });
+		this.draft.push({ name, subjects: [], subjectTags: {} });
 		this.setError("");
 		this.renderAll();
 	}
@@ -258,11 +457,11 @@ class TaxonomyModal extends Modal {
 		const names = new Set<string>();
 		for (const category of this.draft) {
 			if (category.name.trim() === "") {
-				this.setError("存在空的大科目名称");
+				this.setError("存在空的科目名称");
 				return;
 			}
 			if (names.has(category.name)) {
-				this.setError("存在重复的大科目名称");
+				this.setError("存在重复的科目名称");
 				return;
 			}
 			names.add(category.name);
@@ -280,15 +479,27 @@ class TaxonomyModal extends Modal {
 		if (this.errorEl.textContent !== "") return;
 		this.saveBtn.disabled = true;
 		const taxonomy: TaxonomyConfig = {
-			categories: this.draft.map((category) => ({
-				...(category as Record<string, unknown>),
-				name: category.name,
-				subjects: [...category.subjects],
-			})),
+			categories: this.draft.map((category) => {
+				const subjectTags: Record<string, string[]> = {};
+				for (const subject of category.subjects) {
+					const tags = category.subjectTags[subject] ?? [];
+					if (tags.length > 0) subjectTags[subject] = [...tags];
+				}
+				return {
+					...(category as Record<string, unknown>),
+					name: category.name,
+					subjects: [...category.subjects],
+					subjectTags,
+				};
+			}),
 			seeded: true,
 		};
 		try {
 			await this.plugin.saveSettings({ ...this.plugin.settings, taxonomy });
+			if (this.renames.length > 0) {
+				const count = await this.plugin.syncTagRenames(this.renames);
+				if (count > 0) new Notice(`已同步 ${count} 道题的小标签`);
+			}
 			this.saved = true;
 			this.plugin.refreshAll();
 			this.close();

@@ -76,7 +76,7 @@ class MetadataEditorModal extends Modal {
 
 		this.categoryInput = this.buildRow(form, {
 			id: "pd-meta-category",
-			label: "大科目",
+			label: "科目",
 			value: this.card.category ?? "数学",
 			listId: "pd-meta-category-list",
 			suggestions: categories,

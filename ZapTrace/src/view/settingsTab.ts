@@ -25,7 +25,7 @@ export class ZaptraceSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("分类设置")
-			.setDesc("管理大科目与子科目；只影响标签编辑器里的可选项，不改写已有题卡。")
+			.setDesc("管理科目与子科目；只影响标签编辑器里的可选项，不改写已有题卡。")
 			.addButton((button) =>
 				button.setButtonText("编辑分类").onClick(() => openTaxonomyModal(this.plugin))
 			);

@@ -1,11 +1,11 @@
 import { setIcon } from "obsidian";
 import type { PluginContext } from "./pluginContext.ts";
 import type { QuestionCard } from "../core/types.ts";
-import { taxonomySubjects } from "../core/taxonomy.ts";
+import { taxonomySubjectTags, taxonomySubjects } from "../core/taxonomy.ts";
 
 /**
  * 标签编辑 popover（DESIGN-v3.2 §2，非 modal）：
- * 大科目/子科目只能选 taxonomy 已配置值；标签可自由新增。
+ * 科目/子科目只能选 taxonomy 已配置值；标签可自由新增。
  */
 
 let active:
@@ -56,26 +56,49 @@ export function openTagPopover(
 	head.append(title, closeBtn);
 	root.appendChild(head);
 
-	const categoryRow = row(root, "大科目");
+	const categoryRow = row(root, "科目");
 	const categorySelect = select(categoryRow);
 	const subjectRow = row(root, "子科目");
 	const subjectSelect = select(subjectRow);
+	// 该「科目 > 子科目」下已定义的小标签：点一下加入已选
+	const availableRow = row(root, "可选标签");
+	const available = document.createElement("div");
+	available.className = "pd-tag-selected pd-tag-available";
+	availableRow.appendChild(available);
 	const tagsRow = row(root, "已选标签", true);
 	const selected = document.createElement("div");
 	selected.className = "pd-tag-selected";
 	const input = document.createElement("input");
-	input.className = "pd-pop-input";
-	input.placeholder = "输入标签，回车添加";
+	input.className = "pd-pop-input pd-tag-add-input";
+	input.placeholder = "新标签";
 	input.setAttribute("aria-label", "添加标签");
+	input.hidden = true;
 	const datalistId = `pd-tag-options-${Date.now()}`;
 	const datalist = document.createElement("datalist");
 	datalist.id = datalistId;
 	input.setAttribute("list", datalistId);
-	tagsRow.append(selected, input, datalist);
+	// 虚线「+ 添加标签」跟在已有标签后面；点击后才出现输入框
+	const addChip = document.createElement("button");
+	addChip.type = "button";
+	addChip.className = "pd-tag-add";
+	addChip.textContent = "+ 添加标签";
+	addChip.disabled = readOnly;
+	selected.append(addChip, input);
+	tagsRow.append(selected, datalist);
 
-	const hint = document.createElement("div");
-	hint.className = "pd-pop-hint";
-	hint.textContent = "大科目/子科目需在「分类设置」中添加；标签可自由新增";
+	const hideAdd = (): void => {
+		input.value = "";
+		input.hidden = true;
+		addChip.hidden = false;
+	};
+	const beginAdd = (): void => {
+		if (readOnly) return;
+		addChip.hidden = true;
+		input.hidden = false;
+		input.focus();
+	};
+	addChip.addEventListener("click", beginAdd);
+
 	const error = document.createElement("div");
 	error.className = "pd-pop-error";
 	error.setAttribute("role", "status");
@@ -91,7 +114,7 @@ export function openTagPopover(
 	save.className = "pd-btn is-primary pd-btn-small";
 	save.textContent = "保存";
 	actions.append(cancel, save);
-	root.append(hint, error, actions);
+	root.append(error, actions);
 	document.body.appendChild(root);
 
 	const names = taxonomy.categories.map((item) => item.name);
@@ -143,7 +166,7 @@ export function openTagPopover(
 		subjectSelect.value = subject;
 		subjectSelect.disabled = readOnly || !category;
 		subjectSelect.setAttribute("aria-disabled", String(subjectSelect.disabled));
-		subjectSelect.title = category ? "" : "请先选择大科目";
+		subjectSelect.title = category ? "" : "请先选择科目";
 	};
 
 	const refreshSuggestions = (): void => {
@@ -151,6 +174,7 @@ export function openTagPopover(
 		const set = new Set<string>();
 		for (const item of plugin.getCards()) {
 			if ((item.category || "数学") !== category) continue;
+			if (subject !== "" && item.subject !== subject) continue;
 			for (const tag of item.tags) if (!tags.includes(tag)) set.add(tag);
 		}
 		for (const tag of [...set].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
@@ -160,8 +184,36 @@ export function openTagPopover(
 		}
 	};
 
+	// 可选标签：只列当前「科目 > 子科目」标签库里的项，点击即加入
+	const renderAvailable = (): void => {
+		available.empty();
+		const options = taxonomySubjectTags(plugin.settings.taxonomy, category, subject).filter(
+			(tag) => !tags.includes(tag)
+		);
+		if (options.length === 0) {
+			const empty = document.createElement("span");
+			empty.className = "pd-pop-empty";
+			empty.textContent = subject === "" ? "先选择子科目" : "暂无预置标签，可直接输入新增";
+			available.appendChild(empty);
+			return;
+		}
+		for (const tag of options) {
+			const chip = document.createElement("button");
+			chip.type = "button";
+			chip.className = "pd-chip pd-chip-tag";
+			chip.textContent = tag;
+			chip.disabled = readOnly;
+			chip.addEventListener("click", () => addTag(tag));
+			available.appendChild(chip);
+		}
+	};
+
 	const renderTags = (): void => {
-		selected.empty();
+		for (const node of Array.from(
+			selected.querySelectorAll(".pd-tag-selected-chip, .pd-pop-empty")
+		)) {
+			node.remove();
+		}
 		for (const tag of tags) {
 			const chip = document.createElement("span");
 			chip.className = "pd-tag is-topic pd-tag-selected-chip";
@@ -177,16 +229,17 @@ export function openTagPopover(
 				tags = tags.filter((item) => item !== tag);
 				renderTags();
 				refreshSuggestions();
+				renderAvailable();
 				updateSaveState();
 			});
 			chip.append(label, remove);
-			selected.appendChild(chip);
+			selected.insertBefore(chip, addChip);
 		}
 		if (tags.length === 0) {
 			const empty = document.createElement("span");
 			empty.className = "pd-pop-empty";
 			empty.textContent = "暂无标签";
-			selected.appendChild(empty);
+			selected.insertBefore(empty, addChip);
 		}
 	};
 
@@ -196,6 +249,7 @@ export function openTagPopover(
 		tags = [...tags, value];
 		renderTags();
 		refreshSuggestions();
+		renderAvailable();
 		updateSaveState();
 	};
 
@@ -214,17 +268,26 @@ export function openTagPopover(
 		renderSubjectOptions();
 		renderTags();
 		refreshSuggestions();
+		renderAvailable();
 		updateSaveState();
 	});
 	subjectSelect.addEventListener("change", () => {
 		subject = subjectSelect.value;
+		renderAvailable();
+		refreshSuggestions();
 		updateSaveState();
 	});
 	input.addEventListener("keydown", (event) => {
 		if (event.key === "Enter") {
 			event.preventDefault();
 			addTag(input.value);
-			input.value = "";
+			hideAdd();
+			return;
+		}
+		if (event.key === "Escape") {
+			event.preventDefault();
+			hideAdd();
+			event.stopPropagation();
 			return;
 		}
 		if (event.key === "Backspace" && input.value === "" && tags.length > 0) {
@@ -232,8 +295,15 @@ export function openTagPopover(
 			tags = tags.slice(0, -1);
 			renderTags();
 			refreshSuggestions();
+			renderAvailable();
 			updateSaveState();
 		}
+	});
+	// 失焦也提交，避免「输入了却没按回车」丢失
+	input.addEventListener("blur", () => {
+		if (input.hidden) return;
+		if (input.value.trim() !== "") addTag(input.value);
+		hideAdd();
 	});
 
 	const requestClose = (force = false): void => {
@@ -257,7 +327,7 @@ export function openTagPopover(
 			return;
 		}
 		if (!category) {
-			error.textContent = "请先选择大科目（需在分类设置中添加）";
+			error.textContent = "请先选择科目（需在分类设置中添加）";
 			return;
 		}
 		save.disabled = true;
@@ -273,6 +343,8 @@ export function openTagPopover(
 		if (!result.changed) {
 			// 内容未变化：直接关闭
 		}
+		// 新增/使用的标签同步进「科目 > 子科目 > 小标签」库
+		plugin.rememberTags(category, subject, tags);
 		requestClose(true);
 	};
 
@@ -323,6 +395,7 @@ export function openTagPopover(
 	renderCategoryOptions();
 	renderSubjectOptions();
 	renderTags();
+	renderAvailable();
 	refreshSuggestions();
 	updateSaveState();
 	anchor.setAttribute("aria-expanded", "true");

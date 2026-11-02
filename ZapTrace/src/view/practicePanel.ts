@@ -5,6 +5,7 @@ import { PracticeSession } from "../core/practice.ts";
 import { buildRatingBar } from "./ratingBar.ts";
 import { createButton, createCollapsible, clearElement } from "./dom.ts";
 import { createRenderScope, type RenderScope } from "./renderOwner.ts";
+import { answerKeyText, renderChoices } from "./choices.ts";
 
 /**
  * 练习面板（DESIGN-v2 §5.6 抽屉内容；行为与 H4 门禁完全不变）：
@@ -19,6 +20,8 @@ export class PracticePanel {
 	private scope: RenderScope | null = null;
 	private session: PracticeSession | null = null;
 	private status: string | null = null;
+	/** 当前题的单选/多选/判断作答（仅本会话，不落盘） */
+	private selection: string[] = [];
 
 	constructor(host: HTMLElement, plugin: PluginContext, ownerComponent: Component) {
 		this.host = host;
@@ -42,6 +45,7 @@ export class PracticePanel {
 	start(cards: QuestionCard[]): void {
 		this.session = new PracticeSession(cards);
 		this.status = null;
+		this.selection = [];
 		this.session.markShown(Date.now());
 		this.render();
 	}
@@ -49,6 +53,7 @@ export class PracticePanel {
 	stop(): void {
 		this.session = null;
 		this.status = null;
+		this.selection = [];
 		this.render();
 	}
 
@@ -119,6 +124,38 @@ export class PracticePanel {
 		void MarkdownRenderer.render(this.plugin.app, card.stem, stem, card.file, scope);
 		wrap.appendChild(stem);
 
+		// 单选 / 多选 / 判断：作答 UI（答案只在揭晓后标记）
+		const choices = renderChoices(card, {
+			selection: this.selection,
+			onChange: (next) => {
+				this.selection = next;
+			},
+		});
+		if (choices) {
+			wrap.appendChild(choices.root);
+			if (!session.canReveal) {
+				choices.mark();
+				choices.lock();
+				const correctSet = new Set(card.correct);
+				const selectedSet = new Set(this.selection);
+				const isCorrect =
+					this.selection.length > 0 &&
+					this.selection.length === card.correct.length &&
+					[...correctSet].every((label) => selectedSet.has(label));
+				const result = document.createElement("div");
+				result.className =
+					"pd-choice-result" +
+					(this.selection.length === 0
+						? " is-skip"
+						: isCorrect
+							? " is-correct"
+							: " is-wrong");
+				result.textContent =
+					this.selection.length === 0 ? "未作答" : isCorrect ? "回答正确" : "回答错误";
+				wrap.appendChild(result);
+			}
+		}
+
 		if (session.canReveal) {
 			const actions = document.createElement("div");
 			actions.className = "pd-practice-actions";
@@ -145,6 +182,14 @@ export class PracticePanel {
 			const label = document.createElement("div");
 			label.className = "pd-answer-label";
 			label.textContent = "答案";
+			answerBox.appendChild(label);
+			const keyText = answerKeyText(card);
+			if (keyText !== "") {
+				const key = document.createElement("div");
+				key.className = "pd-answer-key";
+				key.textContent = keyText;
+				answerBox.appendChild(key);
+			}
 			const body = document.createElement("div");
 			body.className = "pd-body";
 			if (card.answer.trim() === "") {
@@ -153,11 +198,11 @@ export class PracticePanel {
 			} else {
 				void MarkdownRenderer.render(this.plugin.app, card.answer, body, card.file, scope);
 			}
-			answerBox.append(label, body);
+			answerBox.appendChild(body);
 			wrap.appendChild(answerBox);
 
 			if (card.notes.trim() !== "") {
-				createCollapsible(wrap, "个人笔记", {
+				createCollapsible(wrap, "笔记", {
 					onFirstOpen: (content) =>
 						void MarkdownRenderer.render(
 							this.plugin.app,
@@ -254,6 +299,7 @@ export class PracticePanel {
 		session.skip();
 		if (!session.finished) session.markShown(Date.now());
 		this.status = null;
+		this.selection = [];
 		this.render();
 	}
 
@@ -275,8 +321,9 @@ export class PracticePanel {
 			const active = this.session;
 			if (!active || active.phase !== "rated") return;
 			active.advance();
-			this.status = null;
-			if (!active.finished) active.markShown(Date.now());
+				this.status = null;
+				this.selection = [];
+				if (!active.finished) active.markShown(Date.now());
 			this.render();
 			this.plugin.refreshAll();
 		}, 320);

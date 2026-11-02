@@ -5,6 +5,7 @@ import type {
 	ZaptraceData,
 	ZaptraceSettings,
 } from "../core/types.ts";
+import type { TagRename } from "../core/taxonomy.ts";
 
 export interface WorkbenchHandle {
 	refreshAll(): void;
@@ -42,6 +43,14 @@ export interface PluginContext {
 	getFileMtime(path: string): number | null;
 	/** 持久化「答案与笔记」折叠开合（按 qid） */
 	setFoldOpen(qid: string, open: boolean): void;
+	/** 记住某题的笔记编辑框高度（px） */
+	setNoteHeight(qid: string, height: number): void;
+	/** 把标签并入「科目 > 子科目 > 小标签」库（settings.taxonomy） */
+	rememberTags(category: string, subject: string, tags: string[]): void;
+	/** 小标签重命名后，批量改写对应题卡的头部 tags；返回改写的题卡数 */
+	syncTagRenames(renames: TagRename[]): Promise<number>;
+	/** 删除题目：从源文件移除整个 zaptrace 块（确认后执行） */
+	deleteCard(card: QuestionCard): Promise<{ ok: boolean; error?: string }>;
 	/** 保存个人笔记：只替换目标 zaptrace 块的「### 个人笔记」节 */
 	saveNotes(card: QuestionCard, notes: string): Promise<{ ok: boolean; error?: string; changed?: boolean }>;
 	/** 保存分类与标签：只改目标 zaptrace 块头部 category/subject/tags */

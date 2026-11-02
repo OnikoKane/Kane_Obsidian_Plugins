@@ -144,8 +144,18 @@ export function normalizeQuestionState(
 			typeof record.notesUpdatedAt === "string" && record.notesUpdatedAt !== ""
 				? record.notesUpdatedAt
 				: null,
+		lastPracticedAt:
+			typeof record.lastPracticedAt === "string" && record.lastPracticedAt !== ""
+				? record.lastPracticedAt
+				: // 旧数据迁移：用最后一条复习记录的时间回填
+					reviews.length > 0
+					? reviews[reviews.length - 1].at
+					: null,
 	};
 	if (typeof record.foldOpen === "boolean") state.foldOpen = record.foldOpen;
+	if (typeof record.noteHeight === "number" && Number.isFinite(record.noteHeight)) {
+		state.noteHeight = Math.min(480, Math.max(56, Math.round(record.noteHeight)));
+	}
 	// 前向兼容：保留单题未知字段
 	const knownState = new Set([
 		"id",
@@ -163,7 +173,9 @@ export function normalizeQuestionState(
 		"reviews",
 		"orphaned",
 		"notesUpdatedAt",
+		"lastPracticedAt",
 		"foldOpen",
+		"noteHeight",
 	]);
 	for (const [key, value] of Object.entries(record)) {
 		if (!knownState.has(key)) (state as unknown as Record<string, unknown>)[key] = value;
@@ -370,6 +382,7 @@ export function ensureQuestionFromCard(
 			reviews: [],
 			orphaned: false,
 			notesUpdatedAt: null,
+			lastPracticedAt: null,
 		};
 		data.questions[card.qid] = created;
 		return created;
@@ -436,6 +449,7 @@ export function recordReview(
 	state.due = due;
 	if (outcome.lapse) state.lapses += 1;
 	state.lastSeenAt = ctx.at;
+	state.lastPracticedAt = ctx.at;
 
 	const entry: ReviewEntry = {
 		at: ctx.at,

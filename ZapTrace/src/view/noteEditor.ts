@@ -49,7 +49,7 @@ export function createNoteEditor(
 	head.className = "pd-note-head";
 	const label = document.createElement("label");
 	label.className = "pd-note-label";
-	label.textContent = "个人笔记";
+	label.textContent = "笔记";
 	const id = `zt-note-${++noteSeq}`;
 	label.htmlFor = id;
 	const time = document.createElement("span");
@@ -61,8 +61,38 @@ export function createNoteEditor(
 	textarea.id = id;
 	textarea.value = card.notes;
 	textarea.placeholder = "写点什么…（支持 Markdown 与 $公式$）";
-	textarea.setAttribute("aria-label", "编辑个人笔记（Markdown）");
+	// 不设 aria-label：<label for> 已提供可访问名，避免 Obsidian 悬浮提示（会挡住编辑区）。
 	if (options.compact) textarea.rows = 2;
+
+	// 恢复该题上次手动拖拽的高度
+	const savedHeight = plugin.getState(card.qid)?.noteHeight;
+	if (typeof savedHeight === "number" && Number.isFinite(savedHeight) && savedHeight > 0) {
+		textarea.style.height = `${savedHeight}px`;
+		textarea.style.minHeight = `${savedHeight}px`;
+	}
+
+	// 用户拖动右下角调整高度后记住（按题持久化）；首帧回调只做基线。
+	if (typeof ResizeObserver !== "undefined") {
+		let baselineSet = false;
+		let lastHeight = textarea.offsetHeight;
+		let timer: number | null = null;
+		const observer = new ResizeObserver(() => {
+			const height = Math.round(textarea.offsetHeight);
+			if (!baselineSet) {
+				baselineSet = true;
+				lastHeight = height;
+				return;
+			}
+			if (Math.abs(height - lastHeight) < 2) return;
+			lastHeight = height;
+			if (timer !== null) window.clearTimeout(timer);
+			timer = window.setTimeout(() => {
+				timer = null;
+				plugin.setNoteHeight(card.qid, height);
+			}, 350);
+		});
+		observer.observe(textarea);
+	}
 
 	const actions = document.createElement("div");
 	actions.className = "pd-note-actions";

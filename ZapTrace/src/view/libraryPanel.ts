@@ -11,6 +11,7 @@ import { createNoteEditor } from "./noteEditor.ts";
 import { openTagPopover } from "./tagPopover.ts";
 import { openTaxonomyModal } from "./taxonomyPanel.ts";
 import { playStarClick } from "./starSound.ts";
+import { answerKeyText, renderChoices } from "./choices.ts";
 import {
 	dueLine,
 	libStatus,
@@ -22,7 +23,7 @@ import {
 } from "./libStatus.ts";
 
 /**
- * 题库页 v3（DESIGN-v3 §4）：大科目→子科目→标签联动、三列紧凑题卡、默认展开答案与笔记、就地编辑。
+ * 题库页 v3（DESIGN-v3 §4）：科目→子科目→标签联动、三列紧凑题卡、默认展开答案与笔记、就地编辑。
  * 全部基于现有数据派生，不新增数据字段；笔记保存走 plugin.saveNotes。
  */
 
@@ -133,15 +134,15 @@ export class LibraryPage {
 		const filterbar = document.createElement("div");
 		filterbar.className = "pd-filterbar";
 
-		// 大科目（前置门槛）
+		// 科目（前置门槛）
 		const categoryField = document.createElement("label");
 		categoryField.className = "pd-field";
 		const categoryLabel = document.createElement("span");
 		categoryLabel.className = "pd-label";
-		categoryLabel.textContent = "大科目";
+		categoryLabel.textContent = "科目";
 		const categorySelect = document.createElement("select");
 		categorySelect.className = "pd-select";
-		categorySelect.setAttribute("aria-label", "大科目筛选");
+		categorySelect.setAttribute("aria-label", "科目筛选");
 		categorySelect.addEventListener("change", () => {
 			this.categoryFilter = categorySelect.value === "" ? null : categorySelect.value;
 			this.filter.subject = null;
@@ -154,7 +155,7 @@ export class LibraryPage {
 		categoryField.append(categoryLabel, categorySelect);
 		this.categorySelect = categorySelect;
 
-		// 子科目（需先选大科目）
+		// 子科目（需先选科目）
 		const subjectField = document.createElement("label");
 		subjectField.className = "pd-field";
 		const subjectLabel = document.createElement("span");
@@ -396,7 +397,7 @@ export class LibraryPage {
 		clearElement(select);
 		const all = document.createElement("option");
 		all.value = "";
-		all.textContent = "全部大科目";
+		all.textContent = "全部科目";
 		select.appendChild(all);
 		for (const category of this.collectCategories()) {
 			const option = document.createElement("option");
@@ -420,11 +421,11 @@ export class LibraryPage {
 		const enabled = this.categoryFilter !== null;
 		select.disabled = !enabled;
 		select.setAttribute("aria-disabled", String(!enabled));
-		select.title = enabled ? "" : "先选择大科目";
+		select.title = enabled ? "" : "先选择科目";
 		clearElement(select);
 		const all = document.createElement("option");
 		all.value = "";
-		all.textContent = enabled ? "全部子科目" : "先选择大科目";
+		all.textContent = enabled ? "全部子科目" : "先选择科目";
 		select.appendChild(all);
 		if (enabled) {
 			const set = new Set<string>();
@@ -448,7 +449,7 @@ export class LibraryPage {
 		clearElement(wrap);
 		const enabled = this.categoryFilter !== null;
 		wrap.setAttribute("aria-disabled", String(!enabled));
-		wrap.title = enabled ? "" : "先选择大科目";
+		wrap.title = enabled ? "" : "先选择科目";
 		const tags = new Set<string>();
 		if (enabled) {
 			for (const card of this.plugin.getCards()) {
@@ -523,7 +524,7 @@ export class LibraryPage {
 			const message =
 				this.categoryFilter !== null &&
 				this.plugin.getCards().some((card) => card.category === this.categoryFilter)
-					? "该大科目下暂无题目"
+					? "该科目下暂无题目"
 					: "没有符合条件的题。";
 			this.renderEmpty(grid, message, false);
 			return;
@@ -545,23 +546,10 @@ export class LibraryPage {
 		qcard.dataset.qid = card.qid;
 		qcard.setAttribute("role", "listitem");
 
-		// 点击区（与折叠/星标分离，避免嵌套交互）
+		// 内容区（只读预览；不再点击整卡打开练习抽屉）
 		const open = document.createElement("div");
 		open.className = "pd-qcard-open";
-		open.setAttribute("role", "button");
-		open.tabIndex = 0;
 		const preview = toPreviewText(card.stem) || "（空题干）";
-		open.setAttribute("aria-label", `练习：${preview.slice(0, 30)}`);
-		const onOpen = (): void => {
-			void this.plugin.startPractice([card]);
-		};
-		open.addEventListener("click", onOpen);
-		open.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" || event.key === " ") {
-				event.preventDefault();
-				onOpen();
-			}
-		});
 
 		const head = document.createElement("div");
 		head.className = "pd-qcard-head";
@@ -572,6 +560,17 @@ export class LibraryPage {
 		stem.className = "pd-qcard-stem";
 		stem.textContent = preview;
 		open.appendChild(stem);
+
+		// 单选 / 多选 / 判断：紧凑选项 UI + 提交答案
+		const choices = renderChoices(card, {
+			compact: true,
+			onSubmit: () => {
+				choices?.mark();
+				choices?.lock();
+				fold?.setOpen(true);
+			},
+		});
+		if (choices) open.appendChild(choices.root);
 
 		const foot = document.createElement("div");
 		foot.className = "pd-qcard-foot";
@@ -586,25 +585,15 @@ export class LibraryPage {
 		const source = document.createElement("span");
 		source.className = "pd-qcard-source";
 		source.textContent = card.source ? `出处：${card.source}` : card.pdf ? "PDF" : "";
-		foot.append(chip);
-		if (dueText) foot.appendChild(due);
+		// 出处靠左、状态靠右（与阅读卡底部一致）
 		foot.appendChild(source);
+		if (dueText) foot.appendChild(due);
+		foot.appendChild(chip);
 		open.appendChild(foot);
 
-		// 工具：常驻星标 + ⋯
+		// 工具：右上角星标 + ⋯
 		const tools = document.createElement("div");
 		tools.className = "pd-qcard-tools";
-		const tagBtn = document.createElement("button");
-		tagBtn.type = "button";
-		tagBtn.className = "pd-icon-btn pd-tag-btn";
-		tagBtn.setAttribute("aria-label", "编辑标签");
-		tagBtn.setAttribute("aria-haspopup", "dialog");
-		tagBtn.setAttribute("aria-expanded", "false");
-		setIcon(tagBtn, "tags");
-		tagBtn.addEventListener("click", (event) => {
-			event.stopPropagation();
-			openTagPopover(tagBtn, this.plugin, card);
-		});
 		const starred = state?.star ?? card.starInitial;
 		const star = document.createElement("button");
 		star.type = "button";
@@ -634,7 +623,7 @@ export class LibraryPage {
 			event.stopPropagation();
 			this.openCardMenu(more, card);
 		});
-		tools.append(tagBtn, star, more);
+		tools.append(star, more);
 
 		// 折叠：答案与笔记（默认展开）
 		const foldWrap = document.createElement("div");
@@ -642,15 +631,26 @@ export class LibraryPage {
 		const openState = state?.foldOpen ?? true;
 		const answerText = toPreviewText(card.answer, 220) || "（无答案）";
 		const noteLines = card.notes.split(/\r?\n/).filter((line) => line.trim() !== "").length;
-		createCollapsible(foldWrap, "答案与笔记", {
+		const fold = createCollapsible(foldWrap, "答案与笔记", {
 			count: noteLines > 0 ? `答案 · 笔记 ${noteLines} 行` : "答案",
 			startsOpen: openState,
-			onToggle: (openFlag) => this.plugin.setFoldOpen(card.qid, openFlag),
+			onToggle: (openFlag) => {
+				this.plugin.setFoldOpen(card.qid, openFlag);
+			},
 			onFirstOpen: (content) => {
+				const keyText = answerKeyText(card);
+				if (keyText !== "") {
+					const key = document.createElement("div");
+					key.className = "pd-answer-key";
+					key.textContent = keyText;
+					content.appendChild(key);
+				}
 				const answer = document.createElement("div");
 				answer.className = "pd-qcard-answer";
 				answer.textContent = answerText;
 				content.appendChild(answer);
+				// 只有作答过才染色，避免未作答时直接泄露正确项
+				if (choices && choices.selection().length > 0) choices.mark();
 				content.appendChild(createNoteEditor(this.plugin, card, content, { compact: true }));
 			},
 		});
@@ -712,16 +712,12 @@ export class LibraryPage {
 			this.renderTable();
 		});
 
-		const main = document.createElement("button");
-		main.type = "button";
+		const main = document.createElement("div");
 		main.className = "pd-trow-main";
 		const title = document.createElement("span");
 		title.className = "pd-trow-title";
 		title.textContent = toPreviewText(card.stem) || "（空题干）";
 		main.appendChild(title);
-		main.addEventListener("click", () => {
-			void this.plugin.startPractice([card]);
-		});
 
 		const subject = document.createElement("span");
 		subject.className = "pd-trow-meta";
@@ -754,26 +750,7 @@ export class LibraryPage {
 	/* ---------------- 菜单 / 标签 / 空态 ---------------- */
 
 	private openCardMenu(anchor: HTMLElement, card: QuestionCard): void {
-		const starred = this.plugin.getState(card.qid)?.star ?? card.starInitial;
 		openMenu(anchor, [
-			{
-				label: starred ? "取消收藏" : "收藏",
-				icon: "star",
-				onSelect: () => {
-					this.plugin.toggleStar(card.qid);
-					this.plugin.requestSave();
-					this.renderStatusChips();
-					this.renderCards();
-					this.renderTable();
-				},
-			},
-			{
-				label: "编辑标签",
-				icon: "tags",
-				onSelect: () => {
-					openTagPopover(anchor, this.plugin, card);
-				},
-			},
 			{
 				label: "打开原文",
 				icon: "external-link",
@@ -786,6 +763,14 @@ export class LibraryPage {
 				icon: "copy",
 				onSelect: () => {
 					void navigator.clipboard.writeText(card.stem);
+				},
+			},
+			{
+				label: "删除题目",
+				icon: "x",
+				danger: true,
+				onSelect: () => {
+					void this.plugin.deleteCard(card);
 				},
 			},
 		]);
@@ -802,7 +787,7 @@ export class LibraryPage {
 		subject.className = "pd-tag is-subject";
 		subject.textContent = card.subject || "未分类";
 		tags.appendChild(subject);
-		const topics = card.tags.slice(0, 2);
+		const topics = card.tags.slice(0, 3);
 		for (const tag of topics) {
 			const chip = document.createElement("span");
 			chip.className = "pd-tag is-topic";
@@ -821,6 +806,19 @@ export class LibraryPage {
 			pdf.textContent = "PDF";
 			tags.appendChild(pdf);
 		}
+		// 标签编辑图标紧跟标签之后（与阅读卡一致）
+		const tagBtn = document.createElement("button");
+		tagBtn.type = "button";
+		tagBtn.className = "pd-icon-btn pd-tag-btn";
+		tagBtn.setAttribute("aria-label", "编辑标签");
+		tagBtn.setAttribute("aria-haspopup", "dialog");
+		tagBtn.setAttribute("aria-expanded", "false");
+		setIcon(tagBtn, "tags");
+		tagBtn.addEventListener("click", (event) => {
+			event.stopPropagation();
+			openTagPopover(tagBtn, this.plugin, card);
+		});
+		tags.appendChild(tagBtn);
 		return tags;
 	}
 

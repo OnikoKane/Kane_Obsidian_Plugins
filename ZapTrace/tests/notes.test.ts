@@ -92,7 +92,7 @@ test("笔记：无笔记节 + 有答案节 → 在答案节后插入", () => {
 	const result = replacePersonalNotes(md, locator(md), "新笔记");
 	assert.equal(result.changed, true);
 	const idxAnswer = result.content.indexOf("### 答案");
-	const idxNotes = result.content.indexOf("### 个人笔记");
+	const idxNotes = result.content.indexOf("### 笔记");
 	assert.ok(idxNotes > idxAnswer);
 	assert.match(result.content, /新笔记/);
 });
@@ -103,7 +103,7 @@ test("笔记：无分节块 → 闭栏前插入，正文不变", () => {
 	const result = replacePersonalNotes(md, ref, "补充笔记");
 	assert.equal(result.changed, true);
 	assert.match(result.content, /只有一段正文，没有分节。/);
-	const idxNotes = result.content.indexOf("### 个人笔记");
+	const idxNotes = result.content.indexOf("### 笔记");
 	const idxFence = result.content.lastIndexOf("```");
 	assert.ok(idxNotes > 0 && idxNotes < idxFence);
 });
@@ -146,7 +146,7 @@ test("笔记：4 反引号外层 + 内含 3 反引号代码，块边界正确", 
 	const result = replacePersonalNotes(md, locator(md), "笔记");
 	assert.equal(result.changed, true);
 	assert.match(result.content, /const a = 1;/);
-	assert.match(result.content, /### 个人笔记/);
+	assert.match(result.content, /### 笔记/);
 });
 
 test("笔记：整体缩进 4 空格，新行沿用缩进，块外不变", () => {
@@ -156,7 +156,7 @@ test("笔记：整体缩进 4 空格，新行沿用缩进，块外不变", () =>
 	// 4 空格围栏不属于 CommonMark 顶层围栏，这里直接给出块位置（notes 函数按 ref 工作）
 	const result = replacePersonalNotes(md, { line: 1, endLine: 6 }, "- 笔记");
 	assert.equal(result.changed, true);
-	assert.match(result.content, /^ {4}### 个人笔记/m);
+	assert.match(result.content, /^ {4}### 笔记/m);
 	assert.match(result.content, /^ {4}- 笔记/m);
 });
 

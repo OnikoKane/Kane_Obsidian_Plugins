@@ -114,7 +114,7 @@ function isValidExplicitId(id) {
 // src/core/parse.ts
 var FENCE_CLOSE_RE = /^ {0,3}(`{3,})[ \t]*$/;
 var KEY_VALUE_RE = /^([A-Za-z][A-Za-z0-9_-]*)[ \t]*:[ \t]*(.*)$/;
-var SECTION_RE = /^\s*#{3,}\s*(题干|答案|个人笔记|AI\s*笔记)\s*$/;
+var SECTION_RE = /^\s*#{3,}\s*(题干|答案|AI\s*笔记|个人笔记|笔记)\s*$/;
 var KNOWN_KEYS = /* @__PURE__ */ new Set([
   "id",
   "category",
@@ -123,8 +123,14 @@ var KNOWN_KEYS = /* @__PURE__ */ new Set([
   "source",
   "star",
   "difficulty",
+  "type",
+  "options",
+  "answer",
   "pdf"
 ]);
+var LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+var JUDGE_TRUE_RE = /^(对|正确|真|是|true|t|√|yes|y|1)$/i;
+var JUDGE_FALSE_RE = /^(错|错误|假|否|false|f|×|x|no|n|0)$/i;
 function dedentLines(lines) {
   let minIndent = Number.POSITIVE_INFINITY;
   for (const line of lines) {
@@ -163,6 +169,98 @@ function splitTags(raw) {
     }
   }
   return result;
+}
+function parseOptions(raw) {
+  const parts = raw.split(/[|｜]/).map((part) => part.trim()).filter((part) => part.length > 0);
+  const seen = /* @__PURE__ */ new Set();
+  const options = [];
+  for (const part of parts) {
+    const match = part.match(/^([A-Za-z])[.、):：]\s*(.*)$/);
+    const label = (match ? match[1] : LETTERS[options.length] ?? String(options.length + 1)).toUpperCase();
+    const text = match ? match[2].trim() : part;
+    if (seen.has(label))
+      continue;
+    seen.add(label);
+    options.push({ label, text });
+  }
+  return options;
+}
+function judgeOptions() {
+  return [
+    { label: "\u6B63\u786E", text: "\u6B63\u786E" },
+    { label: "\u9519\u8BEF", text: "\u9519\u8BEF" }
+  ];
+}
+function parseTypeName(raw) {
+  const value = raw.trim().toLowerCase().replace(/\s+/g, "");
+  if (value === "")
+    return null;
+  if (["single", "radio", "\u5355\u9009", "\u5355\u9009\u9898", "\u5355\u9879\u9009\u62E9"].includes(value))
+    return "single";
+  if (["multiple", "multi", "checkbox", "\u591A\u9009", "\u591A\u9009\u9898", "\u591A\u9879\u9009\u62E9"].includes(value)) {
+    return "multiple";
+  }
+  if (["judge", "tf", "truefalse", "\u5224\u65AD", "\u5224\u65AD\u9898", "\u5BF9\u9519", "\u5BF9\u9519\u9898"].includes(value)) {
+    return "judge";
+  }
+  if (["short", "essay", "\u7B80\u7B54", "\u7B80\u7B54\u9898", "\u95EE\u7B54", "\u95EE\u7B54\u578B", "\u586B\u7A7A", "\u4E3B\u89C2"].includes(value)) {
+    return "short";
+  }
+  return null;
+}
+function parseCorrect(raw, type, options) {
+  const value = raw.trim();
+  if (value === "")
+    return [];
+  if (type === "judge") {
+    if (JUDGE_TRUE_RE.test(value))
+      return ["\u6B63\u786E"];
+    if (JUDGE_FALSE_RE.test(value))
+      return ["\u9519\u8BEF"];
+    return [];
+  }
+  const labels = new Set(options.map((option) => option.label));
+  const parts = value.split(/[,，、;；\s]+/).map((part) => part.trim().toUpperCase().replace(/[^A-Z0-9]/g, "")).filter((part) => part !== "");
+  const expanded = parts.flatMap(
+    (part) => part.length > 1 && /^[A-Z]+$/.test(part) ? part.split("") : [part]
+  );
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const label of expanded) {
+    if (!labels.has(label) || seen.has(label))
+      continue;
+    seen.add(label);
+    result.push(label);
+  }
+  return result;
+}
+function resolveQuestionShape(rawType, rawOptions, rawAnswer) {
+  const declared = parseTypeName(rawType);
+  const parsedOptions = parseOptions(rawOptions);
+  const answerParts = rawAnswer.trim().split(/[,，、;；\s]+/).filter((part) => part !== "");
+  let type;
+  if (declared) {
+    type = declared;
+  } else if (parsedOptions.length >= 2) {
+    type = answerParts.length > 1 ? "multiple" : "single";
+  } else if (JUDGE_TRUE_RE.test(rawAnswer.trim()) || JUDGE_FALSE_RE.test(rawAnswer.trim())) {
+    type = "judge";
+  } else {
+    type = "short";
+  }
+  if (type === "judge") {
+    return { type, options: judgeOptions(), correct: parseCorrect(rawAnswer, "judge", []) };
+  }
+  if (type === "short") {
+    return { type, options: [], correct: [] };
+  }
+  const options = parsedOptions;
+  let correct = parseCorrect(rawAnswer, type, options);
+  if (type === "single" && correct.length > 1)
+    type = "multiple";
+  if (type === "single")
+    correct = correct.slice(0, 1);
+  return { type, options, correct };
 }
 function splitHeader(inner) {
   const firstNonBlank = inner.find((line) => line.trim() !== "");
@@ -209,7 +307,7 @@ function splitSections(bodyLines) {
         currentKey = "stem";
       else if (label === "\u7B54\u6848")
         currentKey = "answer";
-      else if (label === "\u4E2A\u4EBA\u7B14\u8BB0")
+      else if (label === "\u4E2A\u4EBA\u7B14\u8BB0" || label === "\u7B14\u8BB0")
         currentKey = "notes";
       else
         currentKey = "aiNotes";
@@ -275,6 +373,14 @@ function parseBlockInner(file, rawInnerLines, startLine, endLine, options = {}) 
       difficulty = parsed;
   }
   const starRaw = headerMap.get("star")?.trim().toLowerCase() ?? "";
+  const shape = resolveQuestionShape(
+    headerMap.get("type") ?? "",
+    headerMap.get("options") ?? "",
+    headerMap.get("answer") ?? ""
+  );
+  if (shape.type !== "short" && shape.options.length < 2) {
+    errors.push(`\u7B2C ${startLine} \u884C\uFF1A\u9009\u62E9\u9898/\u5224\u65AD\u9898\u7F3A\u5C11 options\uFF08\u81F3\u5C11 2 \u9879\uFF09`);
+  }
   const card = {
     // 索引键与状态键分离（H1）：key 唯一标识「某个文件里的某个块」，
     // qid 只是 data.json 的状态键，可能因重复而被确定性消歧。
@@ -288,6 +394,9 @@ function parseBlockInner(file, rawInnerLines, startLine, endLine, options = {}) 
     tags: splitTags(headerMap.get("tags") ?? ""),
     source: headerMap.get("source")?.trim() ?? "",
     difficulty,
+    type: shape.type,
+    options: shape.options,
+    correct: shape.correct,
     pdf: headerMap.get("pdf")?.trim() ?? "",
     extra,
     starInitial: starRaw === "true",
@@ -466,6 +575,12 @@ var RATING_LABELS = {
   good: "\u60F3\u8D77",
   easy: "\u79D2\u7B54"
 };
+var QUESTION_TYPE_LABELS = {
+  short: "\u7B80\u7B54",
+  single: "\u5355\u9009",
+  multiple: "\u591A\u9009",
+  judge: "\u5224\u65AD"
+};
 
 // src/core/date.ts
 var DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -577,7 +692,7 @@ function asRecord(value) {
 function cleanName(value) {
   return typeof value === "string" ? value.trim() : "";
 }
-function normalizeSubjects(raw) {
+function normalizeNames(raw) {
   if (!Array.isArray(raw))
     return [];
   const seen = /* @__PURE__ */ new Set();
@@ -591,10 +706,24 @@ function normalizeSubjects(raw) {
   }
   return out;
 }
+function normalizeSubjectTags(raw, subjects) {
+  const record = asRecord(raw);
+  if (!record)
+    return {};
+  const subjectSet = new Set(subjects);
+  const out = {};
+  for (const [key, value] of Object.entries(record)) {
+    const subject = key.trim();
+    if (subject === "" || !subjectSet.has(subject))
+      continue;
+    out[subject] = normalizeNames(value);
+  }
+  return out;
+}
 function normalizeCategory(raw) {
   if (typeof raw === "string") {
     const name2 = raw.trim();
-    return name2 === "" ? null : { name: name2, subjects: [] };
+    return name2 === "" ? null : { name: name2, subjects: [], subjectTags: {} };
   }
   const record = asRecord(raw);
   if (!record)
@@ -604,10 +733,16 @@ function normalizeCategory(raw) {
     return null;
   const extra = {};
   for (const [key, value] of Object.entries(record)) {
-    if (key !== "name" && key !== "subjects")
+    if (key !== "name" && key !== "subjects" && key !== "subjectTags")
       extra[key] = value;
   }
-  return { ...extra, name, subjects: normalizeSubjects(record.subjects) };
+  const subjects = normalizeNames(record.subjects);
+  return {
+    ...extra,
+    name,
+    subjects,
+    subjectTags: normalizeSubjectTags(record.subjectTags, subjects)
+  };
 }
 function normalizeTaxonomy(raw) {
   const result = createDefaultTaxonomy();
@@ -635,6 +770,14 @@ function normalizeTaxonomy(raw) {
     if (existing) {
       const union = /* @__PURE__ */ new Set([...existing.subjects, ...category.subjects]);
       existing.subjects = [...union];
+      for (const subject of union) {
+        const tags = /* @__PURE__ */ new Set([
+          ...existing.subjectTags[subject] ?? [],
+          ...category.subjectTags[subject] ?? []
+        ]);
+        if (tags.size > 0)
+          existing.subjectTags[subject] = [...tags];
+      }
     } else {
       byName.set(category.name, category);
     }
@@ -645,6 +788,24 @@ function normalizeTaxonomy(raw) {
 }
 function taxonomySubjects(taxonomy, category) {
   return taxonomy.categories.find((item) => item.name === category)?.subjects ?? [];
+}
+function taxonomySubjectTags(taxonomy, category, subject) {
+  if (subject === "")
+    return [];
+  return taxonomy.categories.find((item) => item.name === category)?.subjectTags[subject] ?? [];
+}
+function withSubjectTags(taxonomy, category, subject, tags) {
+  const next = normalizeTaxonomy(JSON.parse(JSON.stringify(taxonomy)));
+  const target = next.categories.find((item) => item.name === category);
+  if (!target || subject.trim() === "")
+    return next;
+  const key = subject.trim();
+  if (!target.subjects.includes(key))
+    return next;
+  const merged = /* @__PURE__ */ new Set([...target.subjectTags[key] ?? [], ...tags.map((tag) => tag.trim())]);
+  merged.delete("");
+  target.subjectTags[key] = [...merged];
+  return next;
 }
 
 // src/core/state.ts
@@ -756,10 +917,17 @@ function normalizeQuestionState(qid, raw, nowIso) {
     lapses: Math.max(0, asInt(record.lapses, 0)),
     reviews,
     orphaned: asBool(record.orphaned, false),
-    notesUpdatedAt: typeof record.notesUpdatedAt === "string" && record.notesUpdatedAt !== "" ? record.notesUpdatedAt : null
+    notesUpdatedAt: typeof record.notesUpdatedAt === "string" && record.notesUpdatedAt !== "" ? record.notesUpdatedAt : null,
+    lastPracticedAt: typeof record.lastPracticedAt === "string" && record.lastPracticedAt !== "" ? record.lastPracticedAt : (
+      // 旧数据迁移：用最后一条复习记录的时间回填
+      reviews.length > 0 ? reviews[reviews.length - 1].at : null
+    )
   };
   if (typeof record.foldOpen === "boolean")
     state.foldOpen = record.foldOpen;
+  if (typeof record.noteHeight === "number" && Number.isFinite(record.noteHeight)) {
+    state.noteHeight = Math.min(480, Math.max(56, Math.round(record.noteHeight)));
+  }
   const knownState = /* @__PURE__ */ new Set([
     "id",
     "star",
@@ -776,7 +944,9 @@ function normalizeQuestionState(qid, raw, nowIso) {
     "reviews",
     "orphaned",
     "notesUpdatedAt",
-    "foldOpen"
+    "lastPracticedAt",
+    "foldOpen",
+    "noteHeight"
   ]);
   for (const [key, value] of Object.entries(record)) {
     if (!knownState.has(key))
@@ -945,7 +1115,8 @@ function ensureQuestionFromCard(data, card, nowIso) {
       lapses: 0,
       reviews: [],
       orphaned: false,
-      notesUpdatedAt: null
+      notesUpdatedAt: null,
+      lastPracticedAt: null
     };
     data.questions[card.qid] = created;
     return created;
@@ -973,6 +1144,7 @@ function recordReview(data, card, rating, ctx2) {
   if (outcome.lapse)
     state.lapses += 1;
   state.lastSeenAt = ctx2.at;
+  state.lastPracticedAt = ctx2.at;
   const entry = {
     at: ctx2.at,
     rating,
@@ -996,7 +1168,7 @@ function recordReview(data, card, rating, ctx2) {
 
 // src/core/notes.ts
 var FENCE_RE = /^\s*`{3,}\s*zaptrace\s*$/i;
-var SECTION_RE2 = /^(\s*)#{3,}\s*(题干|答案|个人笔记|AI\s*笔记)\s*$/;
+var SECTION_RE2 = /^(\s*)#{3,}\s*(题干|答案|AI\s*笔记|个人笔记|笔记)\s*$/;
 function tokenize(markdown) {
   const lines = [];
   const re = /([^\r\n]*)(\r\n|\n|\r)/g;
@@ -1073,7 +1245,9 @@ function replacePersonalNotes(markdown, ref, notes) {
     }
   }
   const eol = dominantEol(lines, innerStart, innerEnd);
-  const notesSection = sections.find((section) => section.name === "\u4E2A\u4EBA\u7B14\u8BB0");
+  const notesSection = sections.find(
+    (section) => section.name === "\u4E2A\u4EBA\u7B14\u8BB0" || section.name === "\u7B14\u8BB0"
+  );
   let resultLines;
   if (notesSection) {
     let contentEnd = innerEnd;
@@ -1116,7 +1290,7 @@ function replacePersonalNotes(markdown, ref, notes) {
     const body = trimmedNoteLines(notes);
     const block = [
       { text: "", eol },
-      { text: `${indent}### \u4E2A\u4EBA\u7B14\u8BB0`, eol },
+      { text: `${indent}### \u7B14\u8BB0`, eol },
       { text: "", eol },
       ...body.map((line) => ({ text: line.trim() === "" ? "" : `${indent}${line}`, eol })),
       { text: "", eol }
@@ -1707,7 +1881,7 @@ function createNoteEditor(plugin, card, parent, options = {}) {
   head.className = "pd-note-head";
   const label = document.createElement("label");
   label.className = "pd-note-label";
-  label.textContent = "\u4E2A\u4EBA\u7B14\u8BB0";
+  label.textContent = "\u7B14\u8BB0";
   const id = `zt-note-${++noteSeq}`;
   label.htmlFor = id;
   const time = document.createElement("span");
@@ -1718,9 +1892,36 @@ function createNoteEditor(plugin, card, parent, options = {}) {
   textarea.id = id;
   textarea.value = card.notes;
   textarea.placeholder = "\u5199\u70B9\u4EC0\u4E48\u2026\uFF08\u652F\u6301 Markdown \u4E0E $\u516C\u5F0F$\uFF09";
-  textarea.setAttribute("aria-label", "\u7F16\u8F91\u4E2A\u4EBA\u7B14\u8BB0\uFF08Markdown\uFF09");
   if (options.compact)
     textarea.rows = 2;
+  const savedHeight = plugin.getState(card.qid)?.noteHeight;
+  if (typeof savedHeight === "number" && Number.isFinite(savedHeight) && savedHeight > 0) {
+    textarea.style.height = `${savedHeight}px`;
+    textarea.style.minHeight = `${savedHeight}px`;
+  }
+  if (typeof ResizeObserver !== "undefined") {
+    let baselineSet = false;
+    let lastHeight = textarea.offsetHeight;
+    let timer = null;
+    const observer = new ResizeObserver(() => {
+      const height = Math.round(textarea.offsetHeight);
+      if (!baselineSet) {
+        baselineSet = true;
+        lastHeight = height;
+        return;
+      }
+      if (Math.abs(height - lastHeight) < 2)
+        return;
+      lastHeight = height;
+      if (timer !== null)
+        window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        plugin.setNoteHeight(card.qid, height);
+      }, 350);
+    });
+    observer.observe(textarea);
+  }
   const actions = document.createElement("div");
   actions.className = "pd-note-actions";
   const save = document.createElement("button");
@@ -1867,25 +2068,46 @@ function openTagPopover(anchor, plugin, card) {
   (0, import_obsidian3.setIcon)(closeBtn, "x");
   head.append(title, closeBtn);
   root.appendChild(head);
-  const categoryRow = row(root, "\u5927\u79D1\u76EE");
+  const categoryRow = row(root, "\u79D1\u76EE");
   const categorySelect = select(categoryRow);
   const subjectRow = row(root, "\u5B50\u79D1\u76EE");
   const subjectSelect = select(subjectRow);
+  const availableRow = row(root, "\u53EF\u9009\u6807\u7B7E");
+  const available = document.createElement("div");
+  available.className = "pd-tag-selected pd-tag-available";
+  availableRow.appendChild(available);
   const tagsRow = row(root, "\u5DF2\u9009\u6807\u7B7E", true);
   const selected = document.createElement("div");
   selected.className = "pd-tag-selected";
   const input = document.createElement("input");
-  input.className = "pd-pop-input";
-  input.placeholder = "\u8F93\u5165\u6807\u7B7E\uFF0C\u56DE\u8F66\u6DFB\u52A0";
+  input.className = "pd-pop-input pd-tag-add-input";
+  input.placeholder = "\u65B0\u6807\u7B7E";
   input.setAttribute("aria-label", "\u6DFB\u52A0\u6807\u7B7E");
+  input.hidden = true;
   const datalistId = `pd-tag-options-${Date.now()}`;
   const datalist = document.createElement("datalist");
   datalist.id = datalistId;
   input.setAttribute("list", datalistId);
-  tagsRow.append(selected, input, datalist);
-  const hint = document.createElement("div");
-  hint.className = "pd-pop-hint";
-  hint.textContent = "\u5927\u79D1\u76EE/\u5B50\u79D1\u76EE\u9700\u5728\u300C\u5206\u7C7B\u8BBE\u7F6E\u300D\u4E2D\u6DFB\u52A0\uFF1B\u6807\u7B7E\u53EF\u81EA\u7531\u65B0\u589E";
+  const addChip = document.createElement("button");
+  addChip.type = "button";
+  addChip.className = "pd-tag-add";
+  addChip.textContent = "+ \u6DFB\u52A0\u6807\u7B7E";
+  addChip.disabled = readOnly;
+  selected.append(addChip, input);
+  tagsRow.append(selected, datalist);
+  const hideAdd = () => {
+    input.value = "";
+    input.hidden = true;
+    addChip.hidden = false;
+  };
+  const beginAdd = () => {
+    if (readOnly)
+      return;
+    addChip.hidden = true;
+    input.hidden = false;
+    input.focus();
+  };
+  addChip.addEventListener("click", beginAdd);
   const error = document.createElement("div");
   error.className = "pd-pop-error";
   error.setAttribute("role", "status");
@@ -1901,7 +2123,7 @@ function openTagPopover(anchor, plugin, card) {
   save.className = "pd-btn is-primary pd-btn-small";
   save.textContent = "\u4FDD\u5B58";
   actions.append(cancel, save);
-  root.append(hint, error, actions);
+  root.append(error, actions);
   document.body.appendChild(root);
   const names = taxonomy.categories.map((item) => item.name);
   const isConfigured = (name) => names.includes(name);
@@ -1950,13 +2172,15 @@ function openTagPopover(anchor, plugin, card) {
     subjectSelect.value = subject;
     subjectSelect.disabled = readOnly || !category;
     subjectSelect.setAttribute("aria-disabled", String(subjectSelect.disabled));
-    subjectSelect.title = category ? "" : "\u8BF7\u5148\u9009\u62E9\u5927\u79D1\u76EE";
+    subjectSelect.title = category ? "" : "\u8BF7\u5148\u9009\u62E9\u79D1\u76EE";
   };
   const refreshSuggestions = () => {
     datalist.empty();
     const set = /* @__PURE__ */ new Set();
     for (const item of plugin.getCards()) {
       if ((item.category || "\u6570\u5B66") !== category)
+        continue;
+      if (subject !== "" && item.subject !== subject)
         continue;
       for (const tag of item.tags)
         if (!tags.includes(tag))
@@ -1968,8 +2192,34 @@ function openTagPopover(anchor, plugin, card) {
       datalist.appendChild(option);
     }
   };
+  const renderAvailable = () => {
+    available.empty();
+    const options = taxonomySubjectTags(plugin.settings.taxonomy, category, subject).filter(
+      (tag) => !tags.includes(tag)
+    );
+    if (options.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "pd-pop-empty";
+      empty.textContent = subject === "" ? "\u5148\u9009\u62E9\u5B50\u79D1\u76EE" : "\u6682\u65E0\u9884\u7F6E\u6807\u7B7E\uFF0C\u53EF\u76F4\u63A5\u8F93\u5165\u65B0\u589E";
+      available.appendChild(empty);
+      return;
+    }
+    for (const tag of options) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "pd-chip pd-chip-tag";
+      chip.textContent = tag;
+      chip.disabled = readOnly;
+      chip.addEventListener("click", () => addTag(tag));
+      available.appendChild(chip);
+    }
+  };
   const renderTags = () => {
-    selected.empty();
+    for (const node of Array.from(
+      selected.querySelectorAll(".pd-tag-selected-chip, .pd-pop-empty")
+    )) {
+      node.remove();
+    }
     for (const tag of tags) {
       const chip = document.createElement("span");
       chip.className = "pd-tag is-topic pd-tag-selected-chip";
@@ -1985,16 +2235,17 @@ function openTagPopover(anchor, plugin, card) {
         tags = tags.filter((item) => item !== tag);
         renderTags();
         refreshSuggestions();
+        renderAvailable();
         updateSaveState();
       });
       chip.append(label, remove);
-      selected.appendChild(chip);
+      selected.insertBefore(chip, addChip);
     }
     if (tags.length === 0) {
       const empty = document.createElement("span");
       empty.className = "pd-pop-empty";
       empty.textContent = "\u6682\u65E0\u6807\u7B7E";
-      selected.appendChild(empty);
+      selected.insertBefore(empty, addChip);
     }
   };
   const addTag = (raw) => {
@@ -2004,6 +2255,7 @@ function openTagPopover(anchor, plugin, card) {
     tags = [...tags, value];
     renderTags();
     refreshSuggestions();
+    renderAvailable();
     updateSaveState();
   };
   const isDirty = () => category !== initial.category || subject !== initial.subject || tags.join("\0") !== initial.tags.join("\0");
@@ -2016,17 +2268,26 @@ function openTagPopover(anchor, plugin, card) {
     renderSubjectOptions();
     renderTags();
     refreshSuggestions();
+    renderAvailable();
     updateSaveState();
   });
   subjectSelect.addEventListener("change", () => {
     subject = subjectSelect.value;
+    renderAvailable();
+    refreshSuggestions();
     updateSaveState();
   });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       addTag(input.value);
-      input.value = "";
+      hideAdd();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideAdd();
+      event.stopPropagation();
       return;
     }
     if (event.key === "Backspace" && input.value === "" && tags.length > 0) {
@@ -2034,8 +2295,16 @@ function openTagPopover(anchor, plugin, card) {
       tags = tags.slice(0, -1);
       renderTags();
       refreshSuggestions();
+      renderAvailable();
       updateSaveState();
     }
+  });
+  input.addEventListener("blur", () => {
+    if (input.hidden)
+      return;
+    if (input.value.trim() !== "")
+      addTag(input.value);
+    hideAdd();
   });
   const requestClose = (force = false) => {
     if (!force && isDirty()) {
@@ -2060,7 +2329,7 @@ function openTagPopover(anchor, plugin, card) {
       return;
     }
     if (!category) {
-      error.textContent = "\u8BF7\u5148\u9009\u62E9\u5927\u79D1\u76EE\uFF08\u9700\u5728\u5206\u7C7B\u8BBE\u7F6E\u4E2D\u6DFB\u52A0\uFF09";
+      error.textContent = "\u8BF7\u5148\u9009\u62E9\u79D1\u76EE\uFF08\u9700\u5728\u5206\u7C7B\u8BBE\u7F6E\u4E2D\u6DFB\u52A0\uFF09";
       return;
     }
     save.disabled = true;
@@ -2075,6 +2344,7 @@ function openTagPopover(anchor, plugin, card) {
     }
     if (!result.changed) {
     }
+    plugin.rememberTags(category, subject, tags);
     requestClose(true);
   };
   save.addEventListener("click", () => {
@@ -2121,6 +2391,7 @@ function openTagPopover(anchor, plugin, card) {
   renderCategoryOptions();
   renderSubjectOptions();
   renderTags();
+  renderAvailable();
   refreshSuggestions();
   updateSaveState();
   anchor.setAttribute("aria-expanded", "true");
@@ -2199,6 +2470,107 @@ function closeStarSound() {
   }
 }
 
+// src/view/choices.ts
+function renderChoices(card, options = {}) {
+  if (card.type === "short" || card.options.length < 2)
+    return null;
+  const allowed = new Set(card.options.map((option) => option.label));
+  let selected = (options.selection ?? []).filter((label) => allowed.has(label));
+  let locked = false;
+  const root = document.createElement("div");
+  root.className = "pd-choices" + (options.compact ? " is-compact" : "");
+  root.setAttribute("role", card.type === "multiple" ? "group" : "radiogroup");
+  root.setAttribute("aria-label", card.type === "multiple" ? "\u591A\u9009\u9898\u9009\u9879" : "\u9009\u9879");
+  const typeLabel = document.createElement("div");
+  typeLabel.className = "pd-choice-type";
+  typeLabel.textContent = `${QUESTION_TYPE_LABELS[card.type]}\u9898`;
+  root.appendChild(typeLabel);
+  const buttons = /* @__PURE__ */ new Map();
+  const sync = () => {
+    for (const [label, button] of buttons) {
+      button.setAttribute("aria-checked", String(selected.includes(label)));
+      button.classList.toggle("is-selected", selected.includes(label));
+    }
+    if (submitBtn)
+      submitBtn.disabled = locked || selected.length === 0;
+  };
+  const toggle = (label) => {
+    if (locked)
+      return;
+    if (card.type === "multiple") {
+      selected = selected.includes(label) ? selected.filter((item) => item !== label) : [...selected, label];
+    } else {
+      selected = selected.includes(label) ? [] : [label];
+    }
+    sync();
+    options.onChange?.([...selected]);
+  };
+  for (const option of card.options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "pd-choice";
+    button.dataset.label = option.label;
+    button.setAttribute("role", card.type === "multiple" ? "checkbox" : "radio");
+    button.setAttribute("aria-checked", "false");
+    if (card.type !== "judge") {
+      const key = document.createElement("span");
+      key.className = "pd-choice-key";
+      key.textContent = option.label;
+      button.appendChild(key);
+    }
+    const text = document.createElement("span");
+    text.className = "pd-choice-text";
+    text.textContent = option.text;
+    button.appendChild(text);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggle(option.label);
+    });
+    buttons.set(option.label, button);
+    root.appendChild(button);
+  }
+  let submitBtn = null;
+  if (options.onSubmit) {
+    submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "pd-choice-submit";
+    submitBtn.textContent = "\u63D0\u4EA4\u7B54\u6848";
+    submitBtn.disabled = selected.length === 0;
+    submitBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (locked || selected.length === 0)
+        return;
+      options.onSubmit?.([...selected]);
+    });
+    root.appendChild(submitBtn);
+  }
+  sync();
+  return {
+    root,
+    selection: () => [...selected],
+    mark: () => {
+      const correct = new Set(card.correct);
+      for (const [label, button] of buttons) {
+        button.classList.toggle("is-correct", correct.has(label));
+        button.classList.toggle("is-wrong", selected.includes(label) && !correct.has(label));
+      }
+      root.classList.add("is-revealed");
+      if (submitBtn)
+        submitBtn.hidden = true;
+    },
+    lock: () => {
+      locked = true;
+      for (const button of buttons.values())
+        button.disabled = true;
+    }
+  };
+}
+function answerKeyText(card) {
+  if (card.type === "short" || card.correct.length === 0)
+    return "";
+  return `\u6B63\u786E\u7B54\u6848\uFF1A${card.correct.join("\u3001")}`;
+}
+
 // src/view/card.ts
 function renderMarkdown(plugin, text, el, sourcePath, owner) {
   void import_obsidian4.MarkdownRenderer.render(plugin.app, text, el, sourcePath, owner);
@@ -2206,7 +2578,7 @@ function renderMarkdown(plugin, text, el, sourcePath, owner) {
 function lineCount(text) {
   return text.split(/\r?\n/).filter((line) => line.trim() !== "").length;
 }
-function buildTags(card) {
+function buildTags(plugin, card) {
   const tags = document.createElement("div");
   tags.className = "pd-tags";
   const category = document.createElement("span");
@@ -2217,7 +2589,7 @@ function buildTags(card) {
   subject.className = "pd-tag is-subject";
   subject.textContent = card.subject || "\u672A\u5206\u7C7B";
   tags.appendChild(subject);
-  const topics = card.tags.slice(0, 2);
+  const topics = card.tags.slice(0, 3);
   for (const tag of topics) {
     const chip = document.createElement("span");
     chip.className = "pd-tag is-topic";
@@ -2230,6 +2602,7 @@ function buildTags(card) {
     more.textContent = `+${card.tags.length - topics.length}`;
     tags.appendChild(more);
   }
+  tags.appendChild(buildTagButton(plugin, card));
   return tags;
 }
 function buildStarButton(plugin, card) {
@@ -2276,16 +2649,7 @@ function buildMenuButton(plugin, card) {
   (0, import_obsidian4.setIcon)(button, "more-horizontal");
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    const starred = plugin.getState(card.qid)?.star ?? card.starInitial;
     openMenu(button, [
-      {
-        label: starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF",
-        icon: "star",
-        onSelect: () => {
-          plugin.toggleStar(card.qid);
-          plugin.requestSave();
-        }
-      },
       {
         label: "\u6253\u5F00\u539F\u6587",
         icon: "external-link",
@@ -2298,6 +2662,14 @@ function buildMenuButton(plugin, card) {
         icon: "copy",
         onSelect: () => {
           void navigator.clipboard.writeText(card.stem);
+        }
+      },
+      {
+        label: "\u5220\u9664\u9898\u76EE",
+        icon: "x",
+        danger: true,
+        onSelect: () => {
+          void plugin.deleteCard(card);
         }
       }
     ]);
@@ -2340,20 +2712,26 @@ function renderQuestionCard(options) {
   }
   const head = document.createElement("div");
   head.className = "pd-card-head";
-  head.appendChild(buildTags(card));
+  head.appendChild(buildTags(plugin, card));
   const tools = document.createElement("div");
   tools.className = "pd-card-tools";
-  tools.append(
-    buildTagButton(plugin, card),
-    buildStarButton(plugin, card),
-    buildMenuButton(plugin, card)
-  );
+  tools.append(buildStarButton(plugin, card), buildMenuButton(plugin, card));
   head.appendChild(tools);
   root.appendChild(head);
   const stem = document.createElement("div");
   stem.className = "pd-stem pd-body";
   renderMarkdown(plugin, card.stem, stem, card.file, owner);
   root.appendChild(stem);
+  const state = plugin.getState(card.qid);
+  const choices = renderChoices(card, {
+    onSubmit: () => {
+      choices?.mark();
+      choices?.lock();
+      merged.setOpen(true);
+    }
+  });
+  if (choices)
+    root.appendChild(choices.root);
   if (card.errors.length > 0) {
     const errors = document.createElement("div");
     errors.className = "pd-card-error";
@@ -2365,7 +2743,6 @@ function renderQuestionCard(options) {
     }
     root.appendChild(errors);
   }
-  const state = plugin.getState(card.qid);
   const answerLines = lineCount(card.answer);
   const noteLines = lineCount(card.notes);
   const meta = noteLines > 0 ? `\u7B54\u6848 ${answerLines} \u884C \xB7 \u7B14\u8BB0 ${noteLines} \u884C` : `\u7B54\u6848 ${answerLines} \u884C`;
@@ -2375,9 +2752,18 @@ function renderQuestionCard(options) {
   const merged = createCollapsible(folds, "\u7B54\u6848\u4E0E\u7B14\u8BB0", {
     count: meta,
     startsOpen: state?.foldOpen ?? false,
-    onToggle: (open) => plugin.setFoldOpen(card.qid, open),
+    onToggle: (open) => {
+      plugin.setFoldOpen(card.qid, open);
+    },
     onFirstOpen: (content) => {
       content.dataset.fold = "answer-notes";
+      const keyText = answerKeyText(card);
+      if (keyText !== "") {
+        const key = document.createElement("div");
+        key.className = "pd-answer-key";
+        key.textContent = keyText;
+        content.appendChild(key);
+      }
       const answer = document.createElement("div");
       answer.className = "pd-answer-render pd-body";
       if (card.answer.trim() === "") {
@@ -2387,6 +2773,8 @@ function renderQuestionCard(options) {
         renderMarkdown(plugin, card.answer, answer, card.file, owner);
       }
       content.appendChild(answer);
+      if (choices && choices.selection().length > 0)
+        choices.mark();
       content.appendChild(createNoteEditor(plugin, card, content));
     }
   });
@@ -2457,6 +2845,8 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
     this.draft = [];
     this.saved = false;
     this.readOnly = false;
+    /** 本次草稿里的小标签重命名（保存时同步改写题卡） */
+    this.renames = [];
     this.renderSuggestions = () => void 0;
     this.plugin = plugin;
   }
@@ -2465,13 +2855,15 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
     this.contentEl.addClass("pd-modal");
     this.contentEl.empty();
     this.readOnly = this.plugin.isReadOnly();
-    this.draft = JSON.parse(JSON.stringify(this.plugin.settings.taxonomy.categories));
+    this.draft = normalizeTaxonomy(
+      JSON.parse(JSON.stringify(this.plugin.settings.taxonomy))
+    ).categories;
     const title = document.createElement("h2");
     title.className = "pd-modal-title";
     title.textContent = "\u5206\u7C7B\u8BBE\u7F6E";
     const sub = document.createElement("p");
     sub.className = "pd-modal-sub";
-    sub.textContent = "\u7BA1\u7406\u5927\u79D1\u76EE\u4E0E\u5B50\u79D1\u76EE\uFF1B\u53EA\u5F71\u54CD\u9009\u62E9\u5668\uFF0C\u4E0D\u6539\u5199\u5DF2\u6709\u9898\u5361\u3002";
+    sub.textContent = "\u7BA1\u7406\u79D1\u76EE > \u5B50\u79D1\u76EE > \u5C0F\u6807\u7B7E\uFF1B\u53EA\u5F71\u54CD\u9009\u62E9\u5668\uFF0C\u4E0D\u6539\u5199\u5DF2\u6709\u9898\u5361\u3002";
     this.contentEl.append(title, sub);
     this.container = document.createElement("div");
     this.container.className = "pd-taxonomy-list";
@@ -2480,8 +2872,8 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
     addCategoryRow.className = "pd-taxonomy-add";
     const categoryInput = document.createElement("input");
     categoryInput.className = "pd-modal-input";
-    categoryInput.placeholder = "\u65B0\u589E\u5927\u79D1\u76EE";
-    categoryInput.setAttribute("aria-label", "\u65B0\u589E\u5927\u79D1\u76EE");
+    categoryInput.placeholder = "\u65B0\u589E\u79D1\u76EE";
+    categoryInput.setAttribute("aria-label", "\u65B0\u589E\u79D1\u76EE");
     const addCategory = document.createElement("button");
     addCategory.type = "button";
     addCategory.className = "pd-btn";
@@ -2507,6 +2899,7 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
       const configuredCats = new Set(this.draft.map((item) => item.name));
       const unconfiguredCats = /* @__PURE__ */ new Set();
       const unconfiguredSubjects = /* @__PURE__ */ new Map();
+      const unconfiguredTags = /* @__PURE__ */ new Map();
       for (const card of this.plugin.getCards()) {
         const cat = card.category || "\u6570\u5B66";
         if (!configuredCats.has(cat))
@@ -2517,9 +2910,25 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
           set.add(card.subject);
           unconfiguredSubjects.set(cat, set);
         }
+        if (target && card.subject && target.subjects.includes(card.subject)) {
+          const known = new Set(target.subjectTags[card.subject] ?? []);
+          const key = `${cat}\0${card.subject}`;
+          const entry = unconfiguredTags.get(key) ?? {
+            cat,
+            subject: card.subject,
+            tags: /* @__PURE__ */ new Set()
+          };
+          for (const tag of card.tags) {
+            if (tag.trim() !== "" && !known.has(tag))
+              entry.tags.add(tag);
+          }
+          if (entry.tags.size > 0)
+            unconfiguredTags.set(key, entry);
+        }
       }
-      if (unconfiguredCats.size === 0 && unconfiguredSubjects.size === 0)
+      if (unconfiguredCats.size === 0 && unconfiguredSubjects.size === 0 && unconfiguredTags.size === 0) {
         return;
+      }
       const label = document.createElement("div");
       label.className = "pd-form-hint";
       label.textContent = "\u9898\u5361\u4E2D\u51FA\u73B0\u4F46\u672A\u914D\u7F6E\uFF1A";
@@ -2545,6 +2954,24 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
             const target = this.draft.find((item) => item.name === cat);
             if (target && !target.subjects.includes(subject))
               target.subjects.push(subject);
+            this.renderAll();
+          });
+          suggestions.appendChild(button);
+        }
+      }
+      for (const entry of unconfiguredTags.values()) {
+        const target = this.draft.find((item) => item.name === entry.cat);
+        if (!target)
+          continue;
+        for (const tag of entry.tags) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "pd-chip pd-chip-tag";
+          button.textContent = `${entry.cat} \xB7 ${entry.subject} \xB7 ${tag}`;
+          button.addEventListener("click", () => {
+            const list = target.subjectTags[entry.subject] ?? [];
+            if (!list.includes(tag))
+              target.subjectTags[entry.subject] = [...list, tag];
             this.renderAll();
           });
           suggestions.appendChild(button);
@@ -2583,7 +3010,7 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
     if (this.draft.length === 0) {
       const empty = document.createElement("div");
       empty.className = "pd-empty pd-empty-small";
-      empty.textContent = "\u8FD8\u6CA1\u6709\u5927\u79D1\u76EE\u3002\u6DFB\u52A0\u4E00\u4E2A\uFF0C\u6216\u4ECE\u4E0B\u65B9\u300C\u672A\u914D\u7F6E\u300D\u52A0\u5165\u3002";
+      empty.textContent = "\u8FD8\u6CA1\u6709\u79D1\u76EE\u3002\u6DFB\u52A0\u4E00\u4E2A\uFF0C\u6216\u4ECE\u4E0B\u65B9\u300C\u672A\u914D\u7F6E\u300D\u52A0\u5165\u3002";
       this.container.appendChild(empty);
     }
     for (const category of this.draft) {
@@ -2611,24 +3038,10 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
       subjectRow.className = "pd-taxonomy-subjects";
       const label = document.createElement("span");
       label.className = "pd-form-hint";
-      label.textContent = "\u5B50\u79D1\u76EE\uFF1A";
+      label.textContent = "\u5B50\u79D1\u76EE / \u5C0F\u6807\u7B7E\uFF1A";
       subjectRow.appendChild(label);
       for (const subject of category.subjects) {
-        const chip = document.createElement("span");
-        chip.className = "pd-tag is-topic pd-tag-selected-chip";
-        const text = document.createElement("span");
-        text.textContent = subject;
-        const removeSubject = document.createElement("button");
-        removeSubject.type = "button";
-        removeSubject.className = "pd-tag-remove";
-        removeSubject.setAttribute("aria-label", `\u79FB\u9664\u5B50\u79D1\u76EE ${subject}`);
-        removeSubject.textContent = "\xD7";
-        removeSubject.addEventListener("click", () => {
-          category.subjects = category.subjects.filter((item) => item !== subject);
-          this.renderAll();
-        });
-        chip.append(text, removeSubject);
-        subjectRow.appendChild(chip);
+        subjectRow.appendChild(this.buildSubjectRow(category, subject));
       }
       const input = document.createElement("input");
       input.className = "pd-modal-input pd-taxonomy-subject-input";
@@ -2663,6 +3076,162 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
       this.container.appendChild(block);
     }
   }
+  /** 一个子科目一行：子科目 chip + 它的小标签 + 内联新增输入。 */
+  buildSubjectRow(category, subject) {
+    const row2 = document.createElement("div");
+    row2.className = "pd-taxonomy-subject";
+    const chip = document.createElement("span");
+    chip.className = "pd-tag is-subject pd-tag-selected-chip pd-taxonomy-subject-chip";
+    const text = document.createElement("span");
+    text.textContent = subject;
+    const removeSubject = document.createElement("button");
+    removeSubject.type = "button";
+    removeSubject.className = "pd-tag-remove";
+    removeSubject.setAttribute("aria-label", `\u79FB\u9664\u5B50\u79D1\u76EE ${subject}`);
+    removeSubject.textContent = "\xD7";
+    removeSubject.addEventListener("click", () => {
+      category.subjects = category.subjects.filter((item) => item !== subject);
+      delete category.subjectTags[subject];
+      this.renderAll();
+    });
+    chip.append(text, removeSubject);
+    row2.appendChild(chip);
+    const tags = category.subjectTags[subject] ?? [];
+    for (const tag of tags) {
+      const tagChip = document.createElement("span");
+      tagChip.className = "pd-tag is-topic pd-tag-selected-chip";
+      const tagText = document.createElement("span");
+      tagText.className = "pd-tag-name";
+      tagText.setAttribute("role", "button");
+      tagText.tabIndex = 0;
+      tagText.textContent = tag;
+      const beginEdit = () => this.editSubjectTag(tagChip, category, subject, tag);
+      tagText.addEventListener("click", beginEdit);
+      tagText.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          beginEdit();
+        }
+      });
+      const removeTag = document.createElement("button");
+      removeTag.type = "button";
+      removeTag.className = "pd-tag-remove";
+      removeTag.setAttribute("aria-label", `\u79FB\u9664\u5C0F\u6807\u7B7E ${tag}`);
+      removeTag.textContent = "\xD7";
+      removeTag.addEventListener("click", () => {
+        category.subjectTags[subject] = tags.filter((item) => item !== tag);
+        this.renderAll();
+      });
+      tagChip.append(tagText, removeTag);
+      row2.appendChild(tagChip);
+    }
+    const addChip = document.createElement("button");
+    addChip.type = "button";
+    addChip.className = "pd-tag-add";
+    addChip.textContent = "+ \u6DFB\u52A0\u5C0F\u6807\u7B7E";
+    addChip.disabled = this.readOnly;
+    addChip.addEventListener(
+      "click",
+      () => this.beginAddSubjectTag(row2, addChip, category, subject)
+    );
+    row2.appendChild(addChip);
+    return row2;
+  }
+  /** 虚线「+ 添加小标签」→ 就地展开输入框；Enter/失焦提交，Esc 取消。 */
+  beginAddSubjectTag(row2, chip, category, subject) {
+    const input = document.createElement("input");
+    input.className = "pd-modal-input pd-tag-add-input";
+    input.placeholder = "\u65B0\u5C0F\u6807\u7B7E";
+    input.setAttribute("aria-label", `\u4E3A ${category.name} \xB7 ${subject} \u6DFB\u52A0\u5C0F\u6807\u7B7E`);
+    chip.hidden = true;
+    row2.insertBefore(input, chip);
+    input.focus();
+    let finished = false;
+    const commit = (save) => {
+      if (finished)
+        return;
+      finished = true;
+      const value = input.value.trim();
+      if (save && value !== "") {
+        const list = category.subjectTags[subject] ?? [];
+        if (list.includes(value)) {
+          this.setError("\u8BE5\u5C0F\u6807\u7B7E\u5DF2\u5B58\u5728");
+          this.renderAll();
+          return;
+        }
+        category.subjectTags[subject] = [...list, value];
+        this.setError("");
+      }
+      this.renderAll();
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commit(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        commit(false);
+      }
+    });
+    input.addEventListener("blur", () => commit(true));
+  }
+  /** 把小标签 chip 就地变成输入框；Enter/失焦提交，Esc 取消。 */
+  editSubjectTag(chip, category, subject, oldName) {
+    const input = document.createElement("input");
+    input.className = "pd-modal-input pd-taxonomy-tag-input pd-tag-inline-input";
+    input.value = oldName;
+    input.setAttribute("aria-label", `\u91CD\u547D\u540D\u5C0F\u6807\u7B7E ${oldName}`);
+    chip.textContent = "";
+    chip.appendChild(input);
+    input.focus();
+    input.select();
+    let finished = false;
+    const commit = (save) => {
+      if (finished)
+        return;
+      finished = true;
+      const value = input.value.trim();
+      if (!save || value === "" || value === oldName) {
+        this.renderAll();
+        return;
+      }
+      const list = category.subjectTags[subject] ?? [];
+      if (list.includes(value)) {
+        this.setError("\u8BE5\u5C0F\u6807\u7B7E\u5DF2\u5B58\u5728");
+        this.renderAll();
+        return;
+      }
+      category.subjectTags[subject] = list.map((tag) => tag === oldName ? value : tag);
+      this.recordRename(category.name, subject, oldName, value);
+      this.setError("");
+      this.renderAll();
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commit(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        commit(false);
+      }
+    });
+    input.addEventListener("blur", () => commit(true));
+  }
+  /** 合并连续重命名（A→B→C 记为 A→C；改回原名则移除）。 */
+  recordRename(category, subject, from, to) {
+    const existing = this.renames.find(
+      (rename) => rename.category === category && rename.subject === subject && rename.to === from
+    );
+    if (existing) {
+      if (existing.from === to) {
+        this.renames = this.renames.filter((rename) => rename !== existing);
+      } else {
+        existing.to = to;
+      }
+      return;
+    }
+    this.renames.push({ category, subject, from, to });
+  }
   renderAll() {
     this.renderList();
     this.renderSuggestions();
@@ -2671,14 +3240,14 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
   addCategory(raw) {
     const name = raw.trim();
     if (name === "") {
-      this.setError("\u5927\u79D1\u76EE\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
+      this.setError("\u79D1\u76EE\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
       return;
     }
     if (this.draft.some((item) => item.name === name)) {
-      this.setError("\u8BE5\u5927\u79D1\u76EE\u5DF2\u5B58\u5728");
+      this.setError("\u8BE5\u79D1\u76EE\u5DF2\u5B58\u5728");
       return;
     }
-    this.draft.push({ name, subjects: [] });
+    this.draft.push({ name, subjects: [], subjectTags: {} });
     this.setError("");
     this.renderAll();
   }
@@ -2686,11 +3255,11 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
     const names = /* @__PURE__ */ new Set();
     for (const category of this.draft) {
       if (category.name.trim() === "") {
-        this.setError("\u5B58\u5728\u7A7A\u7684\u5927\u79D1\u76EE\u540D\u79F0");
+        this.setError("\u5B58\u5728\u7A7A\u7684\u79D1\u76EE\u540D\u79F0");
         return;
       }
       if (names.has(category.name)) {
-        this.setError("\u5B58\u5728\u91CD\u590D\u7684\u5927\u79D1\u76EE\u540D\u79F0");
+        this.setError("\u5B58\u5728\u91CD\u590D\u7684\u79D1\u76EE\u540D\u79F0");
         return;
       }
       names.add(category.name);
@@ -2709,15 +3278,29 @@ var TaxonomyModal = class extends import_obsidian6.Modal {
       return;
     this.saveBtn.disabled = true;
     const taxonomy = {
-      categories: this.draft.map((category) => ({
-        ...category,
-        name: category.name,
-        subjects: [...category.subjects]
-      })),
+      categories: this.draft.map((category) => {
+        const subjectTags = {};
+        for (const subject of category.subjects) {
+          const tags = category.subjectTags[subject] ?? [];
+          if (tags.length > 0)
+            subjectTags[subject] = [...tags];
+        }
+        return {
+          ...category,
+          name: category.name,
+          subjects: [...category.subjects],
+          subjectTags
+        };
+      }),
       seeded: true
     };
     try {
       await this.plugin.saveSettings({ ...this.plugin.settings, taxonomy });
+      if (this.renames.length > 0) {
+        const count = await this.plugin.syncTagRenames(this.renames);
+        if (count > 0)
+          new import_obsidian6.Notice(`\u5DF2\u540C\u6B65 ${count} \u9053\u9898\u7684\u5C0F\u6807\u7B7E`);
+      }
       this.saved = true;
       this.plugin.refreshAll();
       this.close();
@@ -2752,7 +3335,7 @@ var ZaptraceSettingsTab = class extends import_obsidian7.PluginSettingTab {
         "\u5F53\u524D\u4E3A\u53EA\u8BFB\u6A21\u5F0F\uFF08data.json \u7248\u672C\u9AD8\u4E8E\u63D2\u4EF6\u6216\u7ED3\u6784\u635F\u574F\uFF09\uFF0C\u8BBE\u7F6E\u4E0E\u8BC4\u5206\u4E0D\u4F1A\u4FDD\u5B58\u3002\u8BF7\u5148\u5907\u4EFD\u5E76\u4FEE\u590D data.json\u3002"
       );
     }
-    new import_obsidian7.Setting(containerEl).setName("\u5206\u7C7B\u8BBE\u7F6E").setDesc("\u7BA1\u7406\u5927\u79D1\u76EE\u4E0E\u5B50\u79D1\u76EE\uFF1B\u53EA\u5F71\u54CD\u6807\u7B7E\u7F16\u8F91\u5668\u91CC\u7684\u53EF\u9009\u9879\uFF0C\u4E0D\u6539\u5199\u5DF2\u6709\u9898\u5361\u3002").addButton(
+    new import_obsidian7.Setting(containerEl).setName("\u5206\u7C7B\u8BBE\u7F6E").setDesc("\u7BA1\u7406\u79D1\u76EE\u4E0E\u5B50\u79D1\u76EE\uFF1B\u53EA\u5F71\u54CD\u6807\u7B7E\u7F16\u8F91\u5668\u91CC\u7684\u53EF\u9009\u9879\uFF0C\u4E0D\u6539\u5199\u5DF2\u6709\u9898\u5361\u3002").addButton(
       (button) => button.setButtonText("\u7F16\u8F91\u5206\u7C7B").onClick(() => openTaxonomyModal(this.plugin))
     );
     new import_obsidian7.Setting(containerEl).setName("\u9898\u5361\u76EE\u5F55").setDesc("\u9650\u5B9A\u626B\u63CF\u8303\u56F4\uFF1B\u7559\u7A7A\u8868\u793A\u626B\u63CF\u5168\u5E93\u3002").addText(
@@ -2959,6 +3542,8 @@ var PracticePanel = class {
     this.scope = null;
     this.session = null;
     this.status = null;
+    /** 当前题的单选/多选/判断作答（仅本会话，不落盘） */
+    this.selection = [];
     this.host = host;
     this.plugin = plugin;
     this.ownerComponent = ownerComponent;
@@ -2977,12 +3562,14 @@ var PracticePanel = class {
   start(cards) {
     this.session = new PracticeSession(cards);
     this.status = null;
+    this.selection = [];
     this.session.markShown(Date.now());
     this.render();
   }
   stop() {
     this.session = null;
     this.status = null;
+    this.selection = [];
     this.render();
   }
   handleKeydown(event) {
@@ -3051,6 +3638,26 @@ var PracticePanel = class {
     stem.className = "pd-practice-stem pd-body";
     void import_obsidian8.MarkdownRenderer.render(this.plugin.app, card.stem, stem, card.file, scope);
     wrap.appendChild(stem);
+    const choices = renderChoices(card, {
+      selection: this.selection,
+      onChange: (next) => {
+        this.selection = next;
+      }
+    });
+    if (choices) {
+      wrap.appendChild(choices.root);
+      if (!session.canReveal) {
+        choices.mark();
+        choices.lock();
+        const correctSet = new Set(card.correct);
+        const selectedSet = new Set(this.selection);
+        const isCorrect = this.selection.length > 0 && this.selection.length === card.correct.length && [...correctSet].every((label) => selectedSet.has(label));
+        const result = document.createElement("div");
+        result.className = "pd-choice-result" + (this.selection.length === 0 ? " is-skip" : isCorrect ? " is-correct" : " is-wrong");
+        result.textContent = this.selection.length === 0 ? "\u672A\u4F5C\u7B54" : isCorrect ? "\u56DE\u7B54\u6B63\u786E" : "\u56DE\u7B54\u9519\u8BEF";
+        wrap.appendChild(result);
+      }
+    }
     if (session.canReveal) {
       const actions = document.createElement("div");
       actions.className = "pd-practice-actions";
@@ -3075,6 +3682,14 @@ var PracticePanel = class {
       const label = document.createElement("div");
       label.className = "pd-answer-label";
       label.textContent = "\u7B54\u6848";
+      answerBox.appendChild(label);
+      const keyText = answerKeyText(card);
+      if (keyText !== "") {
+        const key = document.createElement("div");
+        key.className = "pd-answer-key";
+        key.textContent = keyText;
+        answerBox.appendChild(key);
+      }
       const body = document.createElement("div");
       body.className = "pd-body";
       if (card.answer.trim() === "") {
@@ -3083,10 +3698,10 @@ var PracticePanel = class {
       } else {
         void import_obsidian8.MarkdownRenderer.render(this.plugin.app, card.answer, body, card.file, scope);
       }
-      answerBox.append(label, body);
+      answerBox.appendChild(body);
       wrap.appendChild(answerBox);
       if (card.notes.trim() !== "") {
-        createCollapsible(wrap, "\u4E2A\u4EBA\u7B14\u8BB0", {
+        createCollapsible(wrap, "\u7B14\u8BB0", {
           onFirstOpen: (content) => void import_obsidian8.MarkdownRenderer.render(
             this.plugin.app,
             card.notes,
@@ -3180,6 +3795,7 @@ var PracticePanel = class {
     if (!session.finished)
       session.markShown(Date.now());
     this.status = null;
+    this.selection = [];
     this.render();
   }
   rate(rating) {
@@ -3205,6 +3821,7 @@ var PracticePanel = class {
         return;
       active2.advance();
       this.status = null;
+      this.selection = [];
       if (!active2.finished)
         active2.markShown(Date.now());
       this.render();
@@ -3565,10 +4182,14 @@ var ReviewPanel = class {
 var QUESTION_TEMPLATE = [
   "````zaptrace",
   "id: ",
+  "category: ",
   "subject: ",
   "tags: ",
   "source: ",
   "difficulty: ",
+  "type: single",
+  "options: A.  | B.  | C.  | D. ",
+  "answer: A",
   "---",
   "",
   "### \u9898\u5E72",
@@ -3577,10 +4198,7 @@ var QUESTION_TEMPLATE = [
   "### \u7B54\u6848",
   "",
   "",
-  "### \u4E2A\u4EBA\u7B14\u8BB0",
-  "",
-  "",
-  "### AI \u7B14\u8BB0",
+  "### \u7B14\u8BB0",
   "",
   "````"
 ].join("\n");
@@ -3766,10 +4384,10 @@ var LibraryPage = class {
     categoryField.className = "pd-field";
     const categoryLabel = document.createElement("span");
     categoryLabel.className = "pd-label";
-    categoryLabel.textContent = "\u5927\u79D1\u76EE";
+    categoryLabel.textContent = "\u79D1\u76EE";
     const categorySelect = document.createElement("select");
     categorySelect.className = "pd-select";
-    categorySelect.setAttribute("aria-label", "\u5927\u79D1\u76EE\u7B5B\u9009");
+    categorySelect.setAttribute("aria-label", "\u79D1\u76EE\u7B5B\u9009");
     categorySelect.addEventListener("change", () => {
       this.categoryFilter = categorySelect.value === "" ? null : categorySelect.value;
       this.filter.subject = null;
@@ -4005,7 +4623,7 @@ var LibraryPage = class {
     clearElement(select2);
     const all = document.createElement("option");
     all.value = "";
-    all.textContent = "\u5168\u90E8\u5927\u79D1\u76EE";
+    all.textContent = "\u5168\u90E8\u79D1\u76EE";
     select2.appendChild(all);
     for (const category of this.collectCategories()) {
       const option = document.createElement("option");
@@ -4030,11 +4648,11 @@ var LibraryPage = class {
     const enabled = this.categoryFilter !== null;
     select2.disabled = !enabled;
     select2.setAttribute("aria-disabled", String(!enabled));
-    select2.title = enabled ? "" : "\u5148\u9009\u62E9\u5927\u79D1\u76EE";
+    select2.title = enabled ? "" : "\u5148\u9009\u62E9\u79D1\u76EE";
     clearElement(select2);
     const all = document.createElement("option");
     all.value = "";
-    all.textContent = enabled ? "\u5168\u90E8\u5B50\u79D1\u76EE" : "\u5148\u9009\u62E9\u5927\u79D1\u76EE";
+    all.textContent = enabled ? "\u5168\u90E8\u5B50\u79D1\u76EE" : "\u5148\u9009\u62E9\u79D1\u76EE";
     select2.appendChild(all);
     if (enabled) {
       const set = /* @__PURE__ */ new Set();
@@ -4060,7 +4678,7 @@ var LibraryPage = class {
     clearElement(wrap);
     const enabled = this.categoryFilter !== null;
     wrap.setAttribute("aria-disabled", String(!enabled));
-    wrap.title = enabled ? "" : "\u5148\u9009\u62E9\u5927\u79D1\u76EE";
+    wrap.title = enabled ? "" : "\u5148\u9009\u62E9\u79D1\u76EE";
     const tags = /* @__PURE__ */ new Set();
     if (enabled) {
       for (const card of this.plugin.getCards()) {
@@ -4128,7 +4746,7 @@ var LibraryPage = class {
       return;
     }
     if (cards.length === 0) {
-      const message = this.categoryFilter !== null && this.plugin.getCards().some((card) => card.category === this.categoryFilter) ? "\u8BE5\u5927\u79D1\u76EE\u4E0B\u6682\u65E0\u9898\u76EE" : "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u9898\u3002";
+      const message = this.categoryFilter !== null && this.plugin.getCards().some((card) => card.category === this.categoryFilter) ? "\u8BE5\u79D1\u76EE\u4E0B\u6682\u65E0\u9898\u76EE" : "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u9898\u3002";
       this.renderEmpty(grid, message, false);
       return;
     }
@@ -4150,20 +4768,7 @@ var LibraryPage = class {
     qcard.setAttribute("role", "listitem");
     const open = document.createElement("div");
     open.className = "pd-qcard-open";
-    open.setAttribute("role", "button");
-    open.tabIndex = 0;
     const preview = toPreviewText(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
-    open.setAttribute("aria-label", `\u7EC3\u4E60\uFF1A${preview.slice(0, 30)}`);
-    const onOpen = () => {
-      void this.plugin.startPractice([card]);
-    };
-    open.addEventListener("click", onOpen);
-    open.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        onOpen();
-      }
-    });
     const head = document.createElement("div");
     head.className = "pd-qcard-head";
     head.appendChild(this.buildTags(card));
@@ -4172,6 +4777,16 @@ var LibraryPage = class {
     stem.className = "pd-qcard-stem";
     stem.textContent = preview;
     open.appendChild(stem);
+    const choices = renderChoices(card, {
+      compact: true,
+      onSubmit: () => {
+        choices?.mark();
+        choices?.lock();
+        fold?.setOpen(true);
+      }
+    });
+    if (choices)
+      open.appendChild(choices.root);
     const foot = document.createElement("div");
     foot.className = "pd-qcard-foot";
     const badge = statusLabel(libStatus(card, state, today));
@@ -4185,24 +4800,13 @@ var LibraryPage = class {
     const source = document.createElement("span");
     source.className = "pd-qcard-source";
     source.textContent = card.source ? `\u51FA\u5904\uFF1A${card.source}` : card.pdf ? "PDF" : "";
-    foot.append(chip);
+    foot.appendChild(source);
     if (dueText)
       foot.appendChild(due);
-    foot.appendChild(source);
+    foot.appendChild(chip);
     open.appendChild(foot);
     const tools = document.createElement("div");
     tools.className = "pd-qcard-tools";
-    const tagBtn = document.createElement("button");
-    tagBtn.type = "button";
-    tagBtn.className = "pd-icon-btn pd-tag-btn";
-    tagBtn.setAttribute("aria-label", "\u7F16\u8F91\u6807\u7B7E");
-    tagBtn.setAttribute("aria-haspopup", "dialog");
-    tagBtn.setAttribute("aria-expanded", "false");
-    (0, import_obsidian9.setIcon)(tagBtn, "tags");
-    tagBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openTagPopover(tagBtn, this.plugin, card);
-    });
     const starred = state?.star ?? card.starInitial;
     const star = document.createElement("button");
     star.type = "button";
@@ -4233,21 +4837,32 @@ var LibraryPage = class {
       event.stopPropagation();
       this.openCardMenu(more, card);
     });
-    tools.append(tagBtn, star, more);
+    tools.append(star, more);
     const foldWrap = document.createElement("div");
     foldWrap.className = "pd-qcard-fold";
     const openState = state?.foldOpen ?? true;
     const answerText = toPreviewText(card.answer, 220) || "\uFF08\u65E0\u7B54\u6848\uFF09";
     const noteLines = card.notes.split(/\r?\n/).filter((line) => line.trim() !== "").length;
-    createCollapsible(foldWrap, "\u7B54\u6848\u4E0E\u7B14\u8BB0", {
+    const fold = createCollapsible(foldWrap, "\u7B54\u6848\u4E0E\u7B14\u8BB0", {
       count: noteLines > 0 ? `\u7B54\u6848 \xB7 \u7B14\u8BB0 ${noteLines} \u884C` : "\u7B54\u6848",
       startsOpen: openState,
-      onToggle: (openFlag) => this.plugin.setFoldOpen(card.qid, openFlag),
+      onToggle: (openFlag) => {
+        this.plugin.setFoldOpen(card.qid, openFlag);
+      },
       onFirstOpen: (content) => {
+        const keyText = answerKeyText(card);
+        if (keyText !== "") {
+          const key = document.createElement("div");
+          key.className = "pd-answer-key";
+          key.textContent = keyText;
+          content.appendChild(key);
+        }
         const answer = document.createElement("div");
         answer.className = "pd-qcard-answer";
         answer.textContent = answerText;
         content.appendChild(answer);
+        if (choices && choices.selection().length > 0)
+          choices.mark();
         content.appendChild(createNoteEditor(this.plugin, card, content, { compact: true }));
       }
     });
@@ -4305,16 +4920,12 @@ var LibraryPage = class {
       this.renderCards();
       this.renderTable();
     });
-    const main = document.createElement("button");
-    main.type = "button";
+    const main = document.createElement("div");
     main.className = "pd-trow-main";
     const title = document.createElement("span");
     title.className = "pd-trow-title";
     title.textContent = toPreviewText(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
     main.appendChild(title);
-    main.addEventListener("click", () => {
-      void this.plugin.startPractice([card]);
-    });
     const subject = document.createElement("span");
     subject.className = "pd-trow-meta";
     subject.textContent = `${card.category ?? "\u6570\u5B66"} \xB7 ${card.subject}`;
@@ -4342,26 +4953,7 @@ var LibraryPage = class {
   }
   /* ---------------- 菜单 / 标签 / 空态 ---------------- */
   openCardMenu(anchor, card) {
-    const starred = this.plugin.getState(card.qid)?.star ?? card.starInitial;
     openMenu(anchor, [
-      {
-        label: starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF",
-        icon: "star",
-        onSelect: () => {
-          this.plugin.toggleStar(card.qid);
-          this.plugin.requestSave();
-          this.renderStatusChips();
-          this.renderCards();
-          this.renderTable();
-        }
-      },
-      {
-        label: "\u7F16\u8F91\u6807\u7B7E",
-        icon: "tags",
-        onSelect: () => {
-          openTagPopover(anchor, this.plugin, card);
-        }
-      },
       {
         label: "\u6253\u5F00\u539F\u6587",
         icon: "external-link",
@@ -4374,6 +4966,14 @@ var LibraryPage = class {
         icon: "copy",
         onSelect: () => {
           void navigator.clipboard.writeText(card.stem);
+        }
+      },
+      {
+        label: "\u5220\u9664\u9898\u76EE",
+        icon: "x",
+        danger: true,
+        onSelect: () => {
+          void this.plugin.deleteCard(card);
         }
       }
     ]);
@@ -4389,7 +4989,7 @@ var LibraryPage = class {
     subject.className = "pd-tag is-subject";
     subject.textContent = card.subject || "\u672A\u5206\u7C7B";
     tags.appendChild(subject);
-    const topics = card.tags.slice(0, 2);
+    const topics = card.tags.slice(0, 3);
     for (const tag of topics) {
       const chip = document.createElement("span");
       chip.className = "pd-tag is-topic";
@@ -4408,6 +5008,18 @@ var LibraryPage = class {
       pdf.textContent = "PDF";
       tags.appendChild(pdf);
     }
+    const tagBtn = document.createElement("button");
+    tagBtn.type = "button";
+    tagBtn.className = "pd-icon-btn pd-tag-btn";
+    tagBtn.setAttribute("aria-label", "\u7F16\u8F91\u6807\u7B7E");
+    tagBtn.setAttribute("aria-haspopup", "dialog");
+    tagBtn.setAttribute("aria-expanded", "false");
+    (0, import_obsidian9.setIcon)(tagBtn, "tags");
+    tagBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openTagPopover(tagBtn, this.plugin, card);
+    });
+    tags.appendChild(tagBtn);
     return tags;
   }
   renderEmpty(container, message, showTemplate) {
@@ -4659,10 +5271,18 @@ var ZapTracePlugin = class extends import_obsidian11.Plugin {
       id: "insert-card-template",
       name: "\u63D2\u5165\u9898\u5361\u6A21\u677F",
       editorCallback: (editor) => {
-        editor.replaceSelection(`${QUESTION_TEMPLATE}
-`);
+        this.insertQuestionTemplate(editor);
       }
     });
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor) => {
+        menu.addItem(
+          (item) => item.setTitle("\u63D2\u5165\u9898\u76EE").setIcon("list-plus").onClick(() => {
+            this.insertQuestionTemplate(editor);
+          })
+        );
+      })
+    );
     this.addCommand({
       id: "random-practice",
       name: "\u968F\u673A\u7EC3\u4E00\u9898",
@@ -4755,6 +5375,27 @@ var ZapTracePlugin = class extends import_obsidian11.Plugin {
     state.foldOpen = open;
     this.requestSave();
   }
+  /** 记住某题的笔记编辑框高度（px），下次渲染沿用到阅读卡与题库卡 */
+  setNoteHeight(qid, height) {
+    const state = this.data.questions[qid];
+    if (!state)
+      return;
+    const next = Math.min(480, Math.max(56, Math.round(height)));
+    if (state.noteHeight === next)
+      return;
+    state.noteHeight = next;
+    this.requestSave();
+  }
+  /** 把标签编辑器里用到的标签并入「科目 > 子科目 > 小标签」库（不触发全量刷新）。 */
+  rememberTags(category, subject, tags) {
+    if (this.store.readOnly || tags.length === 0)
+      return;
+    const next = withSubjectTags(this.settings.taxonomy, category, subject, tags);
+    if (JSON.stringify(next) === JSON.stringify(this.settings.taxonomy))
+      return;
+    this.store.updateSettings({ ...this.settings, taxonomy: next });
+    this.settings = this.store.data.settings;
+  }
   /**
    * 保存个人笔记：重新读取最新文件 → 重新定位块 → 只替换「### 个人笔记」节。
    * 绝不改答案/题干/其它块；失败不写盘。
@@ -4832,8 +5473,100 @@ var ZapTracePlugin = class extends import_obsidian11.Plugin {
     this.refreshReadingViews();
     return { ok: true, changed: true };
   }
+  /** 小标签重命名后，批量改写对应题卡的头部 tags（只同步「科目 + 子科目」匹配的卡）。 */
+  async syncTagRenames(renames) {
+    if (this.store.readOnly || renames.length === 0)
+      return 0;
+    const byKey = /* @__PURE__ */ new Map();
+    for (const rename of renames) {
+      if (rename.from === rename.to)
+        continue;
+      const category = rename.category || "\u6570\u5B66";
+      byKey.set(`${category}\0${rename.subject}\0${rename.from}`, rename.to);
+    }
+    if (byKey.size === 0)
+      return 0;
+    let updated = 0;
+    for (const card of [...this.index.cards]) {
+      const rawCategory = card.category ?? "";
+      const category = rawCategory || "\u6570\u5B66";
+      let changed = false;
+      const tags = card.tags.map((tag) => {
+        const next = byKey.get(`${category}\0${card.subject}\0${tag}`);
+        if (next !== void 0 && next !== tag) {
+          changed = true;
+          return next;
+        }
+        return tag;
+      });
+      if (!changed)
+        continue;
+      const result = await this.saveMetadata(card, {
+        category: rawCategory,
+        subject: card.subject,
+        tags
+      });
+      if (result.ok && result.changed)
+        updated++;
+    }
+    if (updated > 0)
+      this.refreshReadingViews();
+    return updated;
+  }
+  /**
+   * 删除题目：从源文件移除整个 zaptrace 块（含题干/答案/笔记），不可恢复。
+   * 练习记录保留在 data.json（标记为 orphaned），同题干重建后会自动接上。
+   */
+  async deleteCard(card) {
+    if (this.store.readOnly)
+      return { ok: false, error: "\u53EA\u8BFB\u6A21\u5F0F" };
+    const file = this.app.vault.getAbstractFileByPath(card.file);
+    if (!(file instanceof import_obsidian11.TFile))
+      return { ok: false, error: "\u627E\u4E0D\u5230\u6E90\u6587\u4EF6" };
+    const confirmed = window.confirm(
+      "\u5220\u9664\u9898\u76EE\u4F1A\u4ECE\u6E90\u6587\u4EF6\u79FB\u9664\u6574\u4E2A\u9898\u5361\u5757\uFF08\u542B\u9898\u5E72/\u7B54\u6848/\u7B14\u8BB0\uFF09\uFF0C\u4E0D\u53EF\u6062\u590D\u3002\u7EE7\u7EED\uFF1F"
+    );
+    if (!confirmed)
+      return { ok: true };
+    const fresh = await this.app.vault.read(file);
+    const scanned = scanZaptraceBlocks(card.file, fresh).cards;
+    let candidates = scanned.filter((item) => item.qid === card.qid || item.key === card.key);
+    if (candidates.length === 0)
+      candidates = scanned.filter((item) => item.line === card.line);
+    if (candidates.length === 0) {
+      return { ok: false, error: "\u9898\u5361\u5DF2\u79FB\u52A8\u6216\u5220\u9664\uFF0C\u8BF7\u5237\u65B0\u7D22\u5F15" };
+    }
+    const target = candidates.reduce(
+      (a, b) => Math.abs(a.line - card.line) <= Math.abs(b.line - card.line) ? a : b
+    );
+    const parts = fresh.match(/[^\r\n]*\r?\n|[^\r\n]+/g) ?? [];
+    const startIdx = target.line - 1;
+    const endIdx = Math.min(target.endLine, parts.length);
+    if (startIdx < 0 || startIdx >= parts.length) {
+      return { ok: false, error: "\u9898\u5361\u4F4D\u7F6E\u65E0\u6548\uFF0C\u8BF7\u5237\u65B0\u7D22\u5F15\u540E\u91CD\u8BD5" };
+    }
+    const kept = [...parts.slice(0, startIdx), ...parts.slice(endIdx)];
+    const isBlank = (value) => value !== void 0 && value.trim() === "";
+    if (isBlank(kept[startIdx - 1]) && isBlank(kept[startIdx])) {
+      kept.splice(startIdx, 1);
+    }
+    const content = kept.join("");
+    await this.app.vault.process(file, () => content);
+    await this.rebuildIndex();
+    this.refreshAll();
+    this.refreshReadingViews();
+    return { ok: true };
+  }
   refreshAll() {
     this.workbench?.refreshAll();
+  }
+  /** 在光标处插入题卡模板；光标不在行首时先补一个空行。 */
+  insertQuestionTemplate(editor) {
+    const cursor = editor.getCursor();
+    const before = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
+    const prefix = before.trim() === "" ? "" : "\n";
+    editor.replaceSelection(`${prefix}${QUESTION_TEMPLATE}
+`);
   }
   async openWorkbench() {
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_ZAPTRACE)[0];
@@ -4967,14 +5700,24 @@ var ZapTracePlugin = class extends import_obsidian11.Plugin {
     const map = /* @__PURE__ */ new Map();
     for (const card of this.index.cards) {
       const category = card.category || "\u6570\u5B66";
-      const subjects = map.get(category) ?? /* @__PURE__ */ new Set();
-      if (card.subject)
-        subjects.add(card.subject);
+      const subjects = map.get(category) ?? /* @__PURE__ */ new Map();
+      const subject = card.subject?.trim() ?? "";
+      if (subject !== "") {
+        const tags = subjects.get(subject) ?? /* @__PURE__ */ new Set();
+        for (const tag of card.tags)
+          if (tag.trim() !== "")
+            tags.add(tag.trim());
+        subjects.set(subject, tags);
+      }
       map.set(category, subjects);
     }
+    const sort = (items) => items.sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
     const categories = [...map.entries()].map(([name, subjects]) => ({
       name,
-      subjects: [...subjects].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+      subjects: sort([...subjects.keys()]),
+      subjectTags: Object.fromEntries(
+        [...subjects.entries()].map(([subject, tags]) => [subject, sort([...tags])])
+      )
     }));
     await this.saveSettings({
       ...this.settings,

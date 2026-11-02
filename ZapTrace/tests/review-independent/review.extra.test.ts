@@ -51,7 +51,8 @@ test("REVIEW-B 时间筛选边界：今天到期 / 已到期 / 7 天内 互不�
   const data = createDefaultData("0.1.0");
   const card: QuestionCard = {
     key: "x.md#0", blockIndex: 0, qid: "x", explicitId: "x", duplicateId: false,
-    subject: "s", tags: [], source: "", difficulty: null, pdf: "", extra: {},
+    subject: "s", tags: [], source: "", difficulty: null,
+    type: "short", options: [], correct: [], pdf: "", extra: {},
     starInitial: false, stem: "题", answer: "答", notes: "", aiNotes: "",
     file: "x.md", line: 1, endLine: 5, errors: [], stemHash: "0123456789ab",
   };

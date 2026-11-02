@@ -1,11 +1,15 @@
-/** 题卡模板（命令「插入题卡模板」与空态「复制模板」共用）。 */
+/** 题卡模板（命令「插入题卡模板」、右键「插入题目」与空态「复制模板」共用）。 */
 export const QUESTION_TEMPLATE = [
 	"````zaptrace",
 	"id: ",
+	"category: ",
 	"subject: ",
 	"tags: ",
 	"source: ",
 	"difficulty: ",
+	"type: single",
+	"options: A.  | B.  | C.  | D. ",
+	"answer: A",
 	"---",
 	"",
 	"### 题干",
@@ -14,10 +18,7 @@ export const QUESTION_TEMPLATE = [
 	"### 答案",
 	"",
 	"",
-	"### 个人笔记",
-	"",
-	"",
-	"### AI 笔记",
+	"### 笔记",
 	"",
 	"````",
 ].join("\n");

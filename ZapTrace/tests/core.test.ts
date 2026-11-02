@@ -185,6 +185,75 @@ test("解析四节题卡与头部字段", () => {
 	assert.equal(card.stemHash.length, 12);
 });
 
+test("题型：单选/多选/判断解析与缺省推断", () => {
+	const make = (header: string[]): string =>
+		["```zaptrace", ...header, "### 题干", "题", "### 答案", "解", "```"].join("\n");
+
+	const single = scanZaptraceBlocks(
+		"a.md",
+		make(["type: 单选", "options: A. 甲 | B. 乙 | C. 丙", "answer: B"])
+	).cards[0];
+	assert.equal(single.type, "single");
+	assert.deepEqual(
+		single.options.map((option) => option.label),
+		["A", "B", "C"]
+	);
+	assert.deepEqual(single.correct, ["B"]);
+
+	const multiple = scanZaptraceBlocks(
+		"b.md",
+		make(["type: multiple", "options: 甲 | 乙 | 丙", "answer: A,C"])
+	).cards[0];
+	assert.equal(multiple.type, "multiple");
+	assert.deepEqual(multiple.correct, ["A", "C"]);
+
+	const judge = scanZaptraceBlocks("c.md", make(["type: 判断", "answer: 错"])).cards[0];
+	assert.equal(judge.type, "judge");
+	assert.deepEqual(
+		judge.options.map((option) => option.label),
+		["正确", "错误"]
+	);
+	assert.deepEqual(judge.correct, ["错误"]);
+
+	// 未写 type，按 options/answer 推断
+	const inferred = scanZaptraceBlocks(
+		"d.md",
+		make(["options: A. 甲 | B. 乙", "answer: A"])
+	).cards[0];
+	assert.equal(inferred.type, "single");
+
+	// 单选却给多个答案 → 自动按多选
+	const coerced = scanZaptraceBlocks(
+		"e.md",
+		make(["type: single", "options: A. 甲 | B. 乙 | C. 丙", "answer: A、C"])
+	).cards[0];
+	assert.equal(coerced.type, "multiple");
+
+	// 无 type/options/answer → 简答
+	const short = scanZaptraceBlocks(
+		"f.md",
+		make([])
+	).cards[0];
+	assert.equal(short.type, "short");
+	assert.deepEqual(short.options, []);
+	assert.deepEqual(short.correct, []);
+});
+
+test("### 笔记 是个人笔记的别名（新旧标题都能解析）", () => {
+	const md = [
+		"```zaptrace",
+		"### 题干",
+		"题",
+		"### 答案",
+		"答",
+		"### 笔记",
+		"- 新写法",
+		"```",
+	].join("\n");
+	const card = scanZaptraceBlocks("n.md", md).cards[0];
+	assert.match(card.notes, /新写法/);
+});
+
 test("未知头部键保留进 extra；缺 --- 时按开头 key: value 识别", () => {
 	const md = [
 		"```zaptrace",
@@ -399,6 +468,17 @@ test("单卡 reviews 超过 20 条裁剪最旧", () => {
 	assert.equal(state.reviews.length, 20);
 });
 
+test("noteHeight 归一：取整并钳制到 56..480，非数字丢弃", () => {
+	const now = "2026-11-02T00:00:00+08:00";
+	assert.equal(normalizeQuestionState("q", { noteHeight: 163.6 }, now).noteHeight, 164);
+	assert.equal(normalizeQuestionState("q", { noteHeight: 10 }, now).noteHeight, 56);
+	assert.equal(normalizeQuestionState("q", { noteHeight: 9000 }, now).noteHeight, 480);
+	assert.equal(
+		normalizeQuestionState("q", { noteHeight: "200" }, now).noteHeight,
+		undefined
+	);
+});
+
 test("recordReview 写入 step/due/lapses/reviews/reviewLog", () => {
 	const card = scanZaptraceBlocks(
 		"a.md",
@@ -456,6 +536,9 @@ function makeCard(qid: string, stem: string, tags: string[], subject: string): Q
 		tags,
 		source: "",
 		difficulty: null,
+		type: "short",
+		options: [],
+		correct: [],
 		pdf: "",
 		extra: {},
 		starInitial: false,

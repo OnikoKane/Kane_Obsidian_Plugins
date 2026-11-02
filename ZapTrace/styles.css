@@ -6,6 +6,8 @@
 
 /* ---------------- 1. 令牌（暗色为默认） ---------------- */
 .pd-root {
+	/* 关闭 Obsidian 原生 aria-label 悬浮提示（编辑器/按钮上的黑色气泡） */
+	--no-tooltip: true;
 	--pd-bg: #1a1a1e;
 	--pd-surface: #232327;
 	--pd-surface-2: #1f1f23;
@@ -67,8 +69,8 @@
 	--pd-drawer-w: 420px;
 	--pd-fold-h-lib: 30px;
 	--pd-answer-preview-h: 96px;
-	--pd-note-min-h: 62px;
-	--pd-note-max-h: 180px;
+	--pd-note-min-h: 120px;
+	--pd-note-max-h: 480px;
 	--pd-tag-h-sm: 20px;
 	--pd-tag-fs-sm: 11px;
 	--pd-grid-cols: 2;
@@ -477,6 +479,144 @@ button.pd-icon-btn {
 	background: color-mix(in srgb, var(--pd-fg) 5%, transparent);
 	color: var(--pd-fg-2);
 }
+.pd-tag.is-type {
+	background: transparent;
+	border: 1px solid var(--pd-line);
+	color: var(--pd-muted);
+}
+
+/* 单选 / 多选 / 判断（.pd-root button 复位用了 !important，这里必须同样加权） */
+.pd-root .pd-choices {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 6px;
+	margin-top: 10px;
+}
+.pd-choice-type {
+	margin-bottom: 2px;
+	font-size: 11.5px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--pd-muted);
+}
+.pd-root .pd-choices.is-compact {
+	gap: 4px;
+	margin-top: 8px;
+}
+.pd-root button.pd-choice {
+	display: flex !important;
+	align-items: flex-start;
+	justify-content: flex-start !important;
+	gap: 8px;
+	width: 100% !important;
+	height: auto !important;
+	min-height: 0 !important;
+	padding: 7px 10px !important;
+	border: 1px solid var(--pd-line-2) !important;
+	border-radius: 8px !important;
+	background: var(--pd-surface-2) !important;
+	box-shadow: none !important;
+	color: var(--pd-fg-2);
+	font-family: var(--pd-font);
+	font-size: 13px;
+	line-height: 1.5;
+	text-align: left;
+	cursor: pointer;
+	transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.pd-root button.pd-choice:hover:not(:disabled) {
+	border-color: var(--pd-line-hover) !important;
+	background: var(--pd-surface-3) !important;
+	color: var(--pd-fg);
+}
+.pd-root button.pd-choice.is-selected {
+	border-color: var(--pd-accent) !important;
+	background: var(--pd-accent-soft) !important;
+	color: var(--pd-fg);
+}
+.pd-root button.pd-choice:disabled {
+	cursor: default;
+	opacity: 0.92;
+}
+.pd-root .pd-choice-key {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 19px;
+	height: 19px;
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--pd-fg) 8%, transparent);
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+}
+.pd-root button.pd-choice.is-correct {
+	border-color: var(--pd-green) !important;
+	background: var(--pd-green-soft) !important;
+	color: var(--pd-green);
+}
+.pd-root button.pd-choice.is-wrong {
+	border-color: var(--pd-red) !important;
+	background: var(--pd-red-soft) !important;
+	color: var(--pd-red);
+}
+.pd-root .pd-choice.is-correct .pd-choice-key {
+	background: var(--pd-green);
+	color: #0c1a12;
+}
+.pd-root .pd-choice.is-wrong .pd-choice-key {
+	background: var(--pd-red);
+	color: #2a0f10;
+}
+.pd-root .pd-choices.is-compact button.pd-choice {
+	padding: 5px 8px !important;
+	font-size: 12.5px;
+}
+.pd-root button.pd-choice-submit {
+	align-self: flex-end;
+	height: 26px !important;
+	min-height: 0 !important;
+	padding: 0 12px !important;
+	border: 0 !important;
+	border-radius: var(--pd-r-ctl) !important;
+	background: var(--pd-accent-soft) !important;
+	box-shadow: none !important;
+	color: var(--pd-accent);
+	font-family: var(--pd-font);
+	font-size: 12.5px;
+	line-height: 1;
+	cursor: pointer;
+	transition: background 120ms ease;
+}
+.pd-root button.pd-choice-submit:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--pd-accent) 18%, var(--pd-accent-soft)) !important;
+}
+.pd-root button.pd-choice-submit:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+.pd-answer-key {
+	margin: 2px 0 6px;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--pd-green);
+}
+.pd-choice-result {
+	margin-top: 8px;
+	font-size: 12.5px;
+	font-weight: 600;
+}
+.pd-choice-result.is-correct {
+	color: var(--pd-green);
+}
+.pd-choice-result.is-wrong {
+	color: var(--pd-red);
+}
+.pd-choice-result.is-skip {
+	color: var(--pd-muted);
+}
 
 .pd-status {
 	display: inline-flex;
@@ -577,8 +717,10 @@ button.pd-icon-btn {
 .pd-menu {
 	position: fixed;
 	z-index: calc(var(--layer-popover, 50) + 2);
-	width: 196px;
-	padding: 5px;
+	width: max-content;
+	min-width: 132px;
+	max-width: 240px;
+	padding: 4px;
 	border: 1px solid var(--pd-line);
 	border-radius: var(--pd-r-pop);
 	background: var(--pd-pop);
@@ -894,13 +1036,17 @@ button.pd-icon-btn {
 	display: none !important;
 }
 .pd-grid {
-	display: grid;
-	grid-template-columns: repeat(var(--pd-grid-cols), minmax(0, 1fr));
-	gap: var(--pd-grid-gap);
-	align-items: start;
+	/* 多列瀑布流：每列内的卡片动态贴紧，避免整行被最高卡撑出空白 */
+	column-count: var(--pd-grid-cols);
+	column-gap: var(--pd-grid-gap);
+}
+.pd-grid > .pd-qcard {
+	break-inside: avoid;
+	-webkit-column-break-inside: avoid;
+	margin: 0 0 var(--pd-grid-gap);
 }
 .pd-grid > .pd-empty {
-	grid-column: 1 / -1;
+	column-span: all;
 }
 .pd-resume {
 	position: absolute;
@@ -974,7 +1120,7 @@ button.pd-icon-btn {
 	white-space: nowrap;
 }
 .pd-qcard-source {
-	margin-left: auto;
+	margin-right: auto;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -1056,7 +1202,6 @@ button.pd-icon-btn {
 	font-family: var(--pd-font);
 	font-size: var(--pd-ui);
 	text-align: left;
-	cursor: pointer;
 }
 .pd-trow-title {
 	display: block;
@@ -1502,11 +1647,15 @@ button.pd-icon-btn {
 }
 .pd-note-time {
 	margin-left: auto;
+	flex: 0 0 auto;
+	white-space: nowrap;
 	font-size: 11px;
 	color: var(--pd-faint);
 }
-.pd-note-input {
-	width: 100%;
+.pd-root .pd-note-input {
+	width: calc(100% - 8px);
+	margin-left: 4px;
+	margin-right: 4px;
 	min-height: var(--pd-note-min-h);
 	max-height: var(--pd-note-max-h);
 	resize: vertical;
@@ -1519,13 +1668,11 @@ button.pd-icon-btn {
 	font-size: 13px;
 	line-height: 1.55;
 }
-.pd-note-input:focus-visible {
+.pd-root .pd-note-input:focus-visible {
 	outline: 2px solid var(--pd-accent);
 	outline-offset: 2px;
 }
-.pd-note-block-compact .pd-note-input {
-	min-height: 48px;
-	max-height: 120px;
+.pd-root .pd-note-block-compact .pd-note-input {
 	font-size: 12.5px;
 }
 .pd-note-actions {
@@ -1557,7 +1704,6 @@ button.pd-icon-btn {
 	display: block;
 	width: 100%;
 	text-align: left;
-	cursor: pointer;
 }
 .pd-qcard-open:focus-visible {
 	outline: 2px solid var(--pd-accent);
@@ -1634,17 +1780,17 @@ button.pd-icon-btn {
 }
 @container (min-width: 1080px) {
 	.pd-grid {
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		column-count: 3;
 	}
 }
 @container (max-width: 1079px) and (min-width: 700px) {
 	.pd-grid {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		column-count: 2;
 	}
 }
 @container (max-width: 699px) {
 	.pd-grid {
-		grid-template-columns: 1fr;
+		column-count: 1;
 	}
 }
 @media (min-width: 1440px) {
@@ -1668,9 +1814,13 @@ button.pd-icon-btn {
 	padding: 0;
 	width: min(520px, calc(100vw - 32px));
 	max-width: calc(100vw - 32px);
+	max-height: calc(100vh - 40px);
+	display: flex;
+	flex-direction: column;
 }
 .pd-modal {
-	padding: 18px 20px 16px;
+	padding: 18px 20px 12px;
+	overflow-y: auto;
 	color: var(--pd-fg);
 	font-family: var(--pd-font);
 	font-size: var(--pd-body);
@@ -1742,6 +1892,11 @@ button.pd-icon-btn {
 	justify-content: flex-end;
 	gap: 8px;
 	margin-top: 14px;
+	position: sticky;
+	bottom: -12px;
+	padding: 10px 0 4px;
+	background: var(--pd-surface);
+	z-index: 1;
 }
 .pd-modal-actions .pd-btn {
 	height: 30px !important;
@@ -1751,19 +1906,29 @@ button.pd-icon-btn {
 
 /* ---------------- 8.7 v3.2 增量（标签按钮 / 星标 / popover / 分类设置） ---------------- */
 .pd-card-head {
-	padding-right: 72px;
+	padding-right: 0;
 }
 .pd-qcard-head {
-	padding-right: 84px;
+	padding-right: 60px;
 }
-.pd-tag-btn {
-	opacity: 1 !important;
+/* 标签编辑图标紧跟标签 chips，与星标/⋯ 分离 */
+.pd-tags .pd-tag-btn {
+	width: 20px;
+	height: 20px;
+	margin-left: 1px;
+	border-radius: 5px;
+	opacity: 0.6;
+	transition: opacity var(--pd-t-hover) var(--pd-ease);
+}
+.pd-tags .pd-tag-btn:hover,
+.pd-tags .pd-tag-btn:focus-visible {
+	opacity: 1;
 }
 .pd-modal-head {
 	margin-bottom: 2px;
 }
 .pd-tag-popover {
-	width: 320px;
+	width: 300px;
 }
 .pd-card-tools .pd-star,
 .pd-qcard-tools .pd-star {
@@ -1791,10 +1956,10 @@ button.pd-icon-btn {
 .pd-popover {
 	position: fixed;
 	z-index: calc(var(--layer-popover, 50) + 3);
-	width: 320px;
+	width: 300px;
 	max-height: min(420px, calc(100vh - 32px));
 	overflow: auto;
-	padding: 12px;
+	padding: 10px;
 	border: 1px solid var(--pd-line);
 	border-radius: 12px;
 	background: var(--pd-pop);
@@ -1813,7 +1978,7 @@ button.pd-icon-btn {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	margin-bottom: 10px;
+	margin-bottom: 8px;
 }
 .pd-popover-title {
 	flex: 1 1 auto;
@@ -1826,12 +1991,12 @@ button.pd-icon-btn {
 	grid-template-columns: 64px minmax(0, 1fr);
 	gap: 8px 10px;
 	align-items: start;
-	margin-bottom: 10px;
+	margin-bottom: 8px;
 }
 .pd-pop-label {
 	font-size: 12px;
 	color: var(--pd-muted);
-	padding-top: 8px;
+	padding-top: 7px;
 }
 .pd-pop-select,
 .pd-pop-input {
@@ -1852,7 +2017,16 @@ button.pd-icon-btn {
 .pd-tag-selected {
 	display: flex;
 	flex-wrap: wrap;
+	align-items: center;
 	gap: 6px;
+}
+.pd-tag-available {
+	gap: 4px;
+}
+.pd-tag-available .pd-chip {
+	height: 22px;
+	padding: 0 7px;
+	font-size: 11.5px;
 }
 .pd-tag-selected-chip {
 	gap: 4px;
@@ -1874,22 +2048,20 @@ button.pd-icon-btn {
 	font-size: 11.5px;
 	color: var(--pd-faint);
 }
-.pd-pop-hint {
-	font-size: 11px;
-	line-height: 1.5;
-	color: var(--pd-faint);
-	margin-bottom: 6px;
-}
 .pd-pop-error {
-	min-height: 16px;
+	min-height: 0;
+	margin-top: 2px;
 	font-size: 11.5px;
 	color: var(--pd-red);
+}
+.pd-pop-error:empty {
+	display: none;
 }
 .pd-pop-actions {
 	display: flex;
 	justify-content: flex-end;
 	gap: 8px;
-	margin-top: 10px;
+	margin-top: 8px;
 }
 .pd-pop-actions .pd-btn {
 	height: 26px !important;
@@ -1932,6 +2104,82 @@ button.pd-icon-btn {
 	width: 140px;
 	height: 26px;
 	font-size: 12.5px;
+}
+/* 子科目一行：子科目 chip + 它的小标签 + 内联新增 */
+.pd-taxonomy-subject {
+	flex: 1 1 100%;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	padding-left: 4px;
+}
+.pd-taxonomy-subject-chip {
+	flex: 0 0 auto;
+}
+.pd-taxonomy-tag-input {
+	width: 108px;
+	height: 24px;
+	font-size: 12px;
+}
+/* 小标签可点击改名 */
+.pd-tag-name {
+	cursor: text;
+	border-radius: 3px;
+}
+.pd-tag-name:hover {
+	text-decoration: underline dotted;
+	text-underline-offset: 3px;
+}
+.pd-tag-name:focus-visible {
+	outline: 2px solid var(--pd-accent);
+	outline-offset: 1px;
+}
+.pd-tag-inline-input {
+	width: 84px;
+	height: 20px;
+	padding: 0 4px;
+	font-size: 12px;
+	border-radius: 4px;
+	background: var(--pd-surface-3);
+}
+/* 虚线「+ 添加…」chip：跟在已有标签后面，点击才展开输入框 */
+.pd-root button.pd-tag-add {
+	display: inline-flex !important;
+	align-items: center;
+	gap: 4px;
+	height: var(--pd-chip-h) !important;
+	min-height: 0 !important;
+	padding: 0 8px !important;
+	border: 1px dashed var(--pd-line) !important;
+	border-radius: var(--pd-r-chip) !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	color: var(--pd-muted);
+	font-family: var(--pd-font);
+	font-size: 11.5px;
+	line-height: 1;
+	cursor: pointer;
+	transition: color 120ms ease, border-color 120ms ease;
+}
+.pd-root button.pd-tag-add:hover:not(:disabled) {
+	color: var(--pd-fg-2);
+	border-color: var(--pd-line-hover) !important;
+}
+.pd-root button.pd-tag-add:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+.pd-root .pd-tag-add-input {
+	width: 120px !important;
+	height: var(--pd-chip-h) !important;
+	padding: 0 8px !important;
+	font-size: 12px;
+	border-radius: var(--pd-r-chip);
+	background: var(--pd-surface-3);
+}
+.pd-taxonomy-cat .pd-modal-input {
+	background: var(--pd-surface-3);
 }
 .pd-taxonomy-add {
 	display: flex;
@@ -1989,7 +2237,7 @@ button.pd-icon-btn {
 }
 @media (max-width: 1023px) {
 	.pd-grid {
-		grid-template-columns: 1fr;
+		column-count: 1;
 	}
 	.pd-search {
 		width: 100%;

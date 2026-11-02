@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeTaxonomy, taxonomyCategoryNames, taxonomySubjects } from "../src/core/taxonomy.ts";
+import {
+	normalizeTaxonomy,
+	taxonomyCategoryNames,
+	taxonomySubjectTags,
+	taxonomySubjects,
+	withSubjectTags,
+} from "../src/core/taxonomy.ts";
 import { normalizeSettings, DEFAULT_SETTINGS } from "../src/core/state.ts";
 
 test("normalizeTaxonomy(undefined) → 空配置", () => {
@@ -40,6 +46,37 @@ test("重名 category 合并 subjects 并集，保留未知字段", () => {
 
 test("非 boolean seeded → false", () => {
 	assert.equal(normalizeTaxonomy({ categories: [], seeded: "yes" }).seeded, false);
+});
+
+test("subjectTags 归一：按子科目保留、trim/去重、丢弃孤儿键", () => {
+	const taxonomy = normalizeTaxonomy({
+		categories: [
+			{
+				name: "数学",
+				subjects: [" 线性代数 ", "线性代数"],
+				subjectTags: {
+					" 线性代数 ": [" 行列式 ", "行列式", "", "向量空间"],
+					离散数学: ["图论"],
+				},
+			},
+		],
+	});
+	assert.deepEqual(taxonomySubjects(taxonomy, "数学"), ["线性代数"]);
+	assert.deepEqual(taxonomySubjectTags(taxonomy, "数学", "线性代数"), ["行列式", "向量空间"]);
+	assert.deepEqual(taxonomySubjectTags(taxonomy, "数学", "离散数学"), []);
+	assert.deepEqual(taxonomySubjectTags(taxonomy, "数学", ""), []);
+});
+
+test("withSubjectTags 合并并去重，且不改原配置", () => {
+	const base = normalizeTaxonomy({
+		categories: [{ name: "数学", subjects: ["线性代数"], subjectTags: { 线性代数: ["行列式"] } }],
+	});
+	const next = withSubjectTags(base, "数学", "线性代数", ["行列式", " 举证 ", "举证"]);
+	assert.deepEqual(taxonomySubjectTags(next, "数学", "线性代数"), ["行列式", "举证"]);
+	assert.deepEqual(taxonomySubjectTags(base, "数学", "线性代数"), ["行列式"]);
+	// 不在 subjects 里的子科目不会被创建
+	const noop = withSubjectTags(base, "数学", "离散数学", ["图论"]);
+	assert.deepEqual(taxonomySubjectTags(noop, "数学", "离散数学"), []);
 });
 
 test("normalizeSettings 旧数据缺 taxonomy → 默认，未知设置字段保留", () => {

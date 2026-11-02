@@ -24,7 +24,7 @@ interface Line {
 }
 
 const FENCE_RE = /^\s*`{3,}\s*zaptrace\s*$/i;
-const SECTION_RE = /^(\s*)#{3,}\s*(题干|答案|个人笔记|AI\s*笔记)\s*$/;
+const SECTION_RE = /^(\s*)#{3,}\s*(题干|答案|AI\s*笔记|个人笔记|笔记)\s*$/;
 
 function tokenize(markdown: string): Line[] {
 	const lines: Line[] = [];
@@ -113,7 +113,9 @@ export function replacePersonalNotes(
 		}
 	}
 	const eol = dominantEol(lines, innerStart, innerEnd);
-	const notesSection = sections.find((section) => section.name === "个人笔记");
+	const notesSection = sections.find(
+		(section) => section.name === "个人笔记" || section.name === "笔记"
+	);
 
 	let resultLines: Line[];
 	if (notesSection) {
@@ -156,7 +158,7 @@ export function replacePersonalNotes(
 		const body = trimmedNoteLines(notes);
 		const block: Line[] = [
 			{ text: "", eol },
-			{ text: `${indent}### 个人笔记`, eol },
+			{ text: `${indent}### 笔记`, eol },
 			{ text: "", eol },
 			...body.map((line) => ({ text: line.trim() === "" ? "" : `${indent}${line}`, eol })),
 			{ text: "", eol },
