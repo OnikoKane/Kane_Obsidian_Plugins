@@ -19,5 +19,5 @@
 
 - `AnnotationMarker_zcode` 是改造版：基于原作者 3.0.18 打了本地补丁，`manifest.json` 的
   `author` 标为 ZCode，`version` 抬到 `99.0.0`，避免被上游版本自动覆盖。
-- `MubuStyle` 为本仓库自有分支，包含 TypeScript 源码与构建产物。
+- `MubuStyle` 包含 TypeScript 源码与构建产物。
 - 原始项目的著作权归各自原作者所有，详见各子目录的「致谢与许可」。
