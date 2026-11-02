@@ -11,6 +11,7 @@ import type {
 import { RATINGS } from "./types.ts";
 import { clampStep, applyRating } from "./scheduler.ts";
 import { addDays, isValidDateString } from "./date.ts";
+import { createDefaultTaxonomy, normalizeTaxonomy } from "./taxonomy.ts";
 
 /**
  * data.json 的结构、迁移与状态写入（DESIGN §9）。
@@ -29,12 +30,13 @@ export const DEFAULT_SETTINGS: ZaptraceSettings = {
 	requireAnswerBeforeReveal: false,
 	livePreview: "compact",
 	theme: "auto",
+	taxonomy: createDefaultTaxonomy(),
 };
 
 export function createDefaultData(pluginVersion: string): ZaptraceData {
 	return {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
-		settings: { ...DEFAULT_SETTINGS },
+		settings: { ...DEFAULT_SETTINGS, taxonomy: createDefaultTaxonomy() },
 		questions: {},
 		reviewLog: [],
 		meta: {
@@ -89,6 +91,7 @@ export function normalizeSettings(raw: unknown): ZaptraceSettings {
 	merged.livePreview = live === "source" ? "source" : "compact";
 	const theme = asString(record.theme, merged.theme);
 	merged.theme = theme === "mubu-dark" ? "mubu-dark" : "auto";
+	merged.taxonomy = normalizeTaxonomy(record.taxonomy);
 	// 前向兼容：保留未知设置字段，不因升级插件而丢弃
 	const knownSettings = new Set(Object.keys(DEFAULT_SETTINGS));
 	for (const [key, value] of Object.entries(record)) {
@@ -137,7 +140,12 @@ export function normalizeQuestionState(
 		lapses: Math.max(0, asInt(record.lapses, 0)),
 		reviews,
 		orphaned: asBool(record.orphaned, false),
+		notesUpdatedAt:
+			typeof record.notesUpdatedAt === "string" && record.notesUpdatedAt !== ""
+				? record.notesUpdatedAt
+				: null,
 	};
+	if (typeof record.foldOpen === "boolean") state.foldOpen = record.foldOpen;
 	// 前向兼容：保留单题未知字段
 	const knownState = new Set([
 		"id",
@@ -154,6 +162,8 @@ export function normalizeQuestionState(
 		"lapses",
 		"reviews",
 		"orphaned",
+		"notesUpdatedAt",
+		"foldOpen",
 	]);
 	for (const [key, value] of Object.entries(record)) {
 		if (!knownState.has(key)) (state as unknown as Record<string, unknown>)[key] = value;
@@ -359,6 +369,7 @@ export function ensureQuestionFromCard(
 			lapses: 0,
 			reviews: [],
 			orphaned: false,
+			notesUpdatedAt: null,
 		};
 		data.questions[card.qid] = created;
 		return created;

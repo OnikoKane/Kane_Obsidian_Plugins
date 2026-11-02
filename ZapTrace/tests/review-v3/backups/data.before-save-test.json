@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "settings": {
+    "cardFolder": "",
+    "defaultSubject": "",
+    "dateMode": "local",
+    "dailyReviewLimit": 20,
+    "requireAnswerBeforeReveal": false,
+    "livePreview": "compact",
+    "theme": "auto"
+  },
+  "questions": {
+    "demo-gaoshu-deriv-001": {
+      "id": "demo-gaoshu-deriv-001",
+      "star": false,
+      "subject": "高等数学",
+      "tags": [
+        "导数",
+        "极限"
+      ],
+      "source": "示例 · 高等数学 第七版 p.86",
+      "file": "zaptrace-demo.md",
+      "stemHash": "03153823b992",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": null
+    },
+    "demo-linear-algebra-002": {
+      "id": "demo-linear-algebra-002",
+      "star": true,
+      "subject": "线性代数",
+      "tags": [
+        "行列式"
+      ],
+      "source": "示例 · 课堂笔记",
+      "file": "zaptrace-demo.md",
+      "stemHash": "b1c97e08e16a",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": null
+    },
+    "demo-code-in-answer-003": {
+      "id": "demo-code-in-answer-003",
+      "star": false,
+      "subject": "离散数学",
+      "tags": [
+        "代码"
+      ],
+      "source": "",
+      "file": "zaptrace-demo.md",
+      "stemHash": "f228a443fb5c",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": null
+    },
+    "auto:e43688ae3675": {
+      "id": "auto:e43688ae3675",
+      "star": false,
+      "subject": "概率论",
+      "tags": [
+        "概念"
+      ],
+      "source": "",
+      "file": "zaptrace-demo.md",
+      "stemHash": "e43688ae3675",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": null
+    },
+    "v3-fixture-math-deriv": {
+      "id": "v3-fixture-math-deriv",
+      "star": false,
+      "subject": "高等数学",
+      "tags": [
+        "导数",
+        "极限"
+      ],
+      "source": "夹具 · 高数 p.1",
+      "file": "zt-v3-fixture.md",
+      "stemHash": "678f6decfd5d",
+      "firstSeenAt": "2026-11-02T17:36:31+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": "2026-11-02T17:41:10+08:00",
+      "foldOpen": true
+    },
+    "v3-fixture-math-linalg": {
+      "id": "v3-fixture-math-linalg",
+      "star": false,
+      "subject": "线性代数",
+      "tags": [
+        "行列式"
+      ],
+      "source": "夹具 · 线代 p.2",
+      "file": "zt-v3-fixture.md",
+      "stemHash": "c655edfff3ff",
+      "firstSeenAt": "2026-11-02T17:36:31+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": null
+    },
+    "v3-fixture-prob": {
+      "id": "v3-fixture-prob",
+      "star": false,
+      "subject": "概率论",
+      "tags": [
+        "概念"
+      ],
+      "source": "",
+      "file": "zt-v3-fixture.md",
+      "stemHash": "2c453998cfae",
+      "firstSeenAt": "2026-11-02T17:36:31+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": null
+    },
+    "v3-fixture-english": {
+      "id": "v3-fixture-english",
+      "star": false,
+      "subject": "阅读理解",
+      "tags": [
+        "词汇"
+      ],
+      "source": "",
+      "file": "zt-v3-fixture.md",
+      "stemHash": "649c35459957",
+      "firstSeenAt": "2026-11-02T17:36:31+08:00",
+      "lastSeenAt": "2026-11-02T17:41:10+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false,
+      "notesUpdatedAt": null
+    }
+  },
+  "reviewLog": [],
+  "meta": {
+    "lastScanAt": "2026-11-02T17:41:10+08:00",
+    "pluginVersion": "0.1.0",
+    "logTruncated": 0
+  }
+}

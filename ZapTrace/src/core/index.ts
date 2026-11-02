@@ -13,6 +13,7 @@ export interface IndexResult {
 	byKey: Map<string, QuestionCard>;
 	/** 状态键 → 卡片（dedupe 后 qid 唯一） */
 	byQid: Map<string, QuestionCard>;
+	categories: string[];
 	subjects: string[];
 	tags: string[];
 	scannedFiles: number;
@@ -115,6 +116,7 @@ export function buildIndex(files: ParseInputFile[], options: BuildOptions = {}):
 			const fallback = options.defaultSubject?.trim() ?? "";
 			rawCards.push({
 				...card,
+				category: card.category || "数学",
 				subject: card.subject || fallback || subjectFromPath(card.file),
 			});
 		}
@@ -123,11 +125,13 @@ export function buildIndex(files: ParseInputFile[], options: BuildOptions = {}):
 	const cards = dedupeCards(rawCards);
 	const byKey = new Map<string, QuestionCard>();
 	const byQid = new Map<string, QuestionCard>();
+	const categories = new Set<string>();
 	const subjects = new Set<string>();
 	const tags = new Set<string>();
 	for (const card of cards) {
 		byKey.set(card.key, card);
 		byQid.set(card.qid, card);
+		categories.add(card.category ?? "数学");
 		subjects.add(card.subject);
 		for (const tag of card.tags) tags.add(tag);
 	}
@@ -136,6 +140,7 @@ export function buildIndex(files: ParseInputFile[], options: BuildOptions = {}):
 		cards,
 		byKey,
 		byQid,
+		categories: Array.from(categories).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
 		subjects: Array.from(subjects).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
 		tags: Array.from(tags).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
 		scannedFiles: filtered.length,
@@ -148,6 +153,7 @@ export function emptyIndex(): IndexResult {
 		cards: [],
 		byKey: new Map(),
 		byQid: new Map(),
+		categories: [],
 		subjects: [],
 		tags: [],
 		scannedFiles: 0,

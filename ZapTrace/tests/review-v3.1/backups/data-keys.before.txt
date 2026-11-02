@@ -1,0 +1,9 @@
+﻿auto:e43688ae3675
+demo-code-in-answer-003
+demo-gaoshu-deriv-001
+demo-linear-algebra-002
+v3-fixture-english
+v3-fixture-math-deriv
+v3-fixture-math-linalg
+v3-fixture-mtime-fallback
+v3-fixture-prob

@@ -36,6 +36,19 @@ export interface PluginContext {
 	toggleStar(qid: string): boolean;
 	requestSave(): void;
 	refreshAll(): void;
+	/** 是否只读（data.json 安全模式） */
+	isReadOnly(): boolean;
+	/** 目标文件的修改时间（epoch ms）；文件不存在返回 null（笔记时间 fallback） */
+	getFileMtime(path: string): number | null;
+	/** 持久化「答案与笔记」折叠开合（按 qid） */
+	setFoldOpen(qid: string, open: boolean): void;
+	/** 保存个人笔记：只替换目标 zaptrace 块的「### 个人笔记」节 */
+	saveNotes(card: QuestionCard, notes: string): Promise<{ ok: boolean; error?: string; changed?: boolean }>;
+	/** 保存分类与标签：只改目标 zaptrace 块头部 category/subject/tags */
+	saveMetadata(
+		card: QuestionCard,
+		next: { category: string; subject: string; tags: string[] }
+	): Promise<{ ok: boolean; error?: string; changed?: boolean }>;
 
 	openWorkbench(): Promise<void>;
 	startPractice(cards: QuestionCard[]): Promise<void>;

@@ -35,6 +35,9 @@ export interface QuestionCard {
 	explicitId: string | null;
 	/** 是否因重复 id 被重命名 */
 	duplicateId: boolean;
+	/** 大科目（category）；缺省推断「数学」（纯派生，不落 data.json） */
+	category?: string;
+	/** 子科目 */
 	subject: string;
 	tags: string[];
 	source: string;
@@ -86,11 +89,17 @@ export interface QuestionState {
 	lapses: number;
 	reviews: ReviewEntry[];
 	orphaned: boolean;
+	/** 个人笔记最后保存时间（本地 ISO）；无笔记/未保存过 → null */
+	notesUpdatedAt: string | null;
+	/** 「答案与笔记」折叠是否展开；undefined = 未设置（阅读默认关、题库默认开） */
+	foldOpen?: boolean;
 }
 
 export type DateMode = "local" | "fixed";
 export type LivePreviewMode = "compact" | "source";
 export type ThemeMode = "auto" | "mubu-dark";
+
+import type { TaxonomyConfig } from "./taxonomy.ts";
 
 export interface ZaptraceSettings {
 	/** 限定扫描目录；空 = 全库 */
@@ -103,6 +112,8 @@ export interface ZaptraceSettings {
 	requireAnswerBeforeReveal: boolean;
 	livePreview: LivePreviewMode;
 	theme: ThemeMode;
+	/** v3.2：分类配置（大科目 → 子科目）；只影响选择器，不改卡片 */
+	taxonomy: TaxonomyConfig;
 }
 
 export interface ReviewLogEntry {

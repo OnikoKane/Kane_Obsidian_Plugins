@@ -12,6 +12,8 @@ import {
 import { buildIndex, emptyIndex, type IndexResult } from "./core/index.ts";
 import { parseBlockInner, scanZaptraceBlocks } from "./core/parse.ts";
 import { ensureQuestionFromCard, markOrphans } from "./core/state.ts";
+import { replacePersonalNotes } from "./core/notes.ts";
+import { patchCardMetadata } from "./core/metadata.ts";
 import { fixedTodayString, localIsoWithOffset, todayString } from "./core/date.ts";
 import type {
 	QuestionCard,
@@ -22,6 +24,7 @@ import type {
 import { StateStore, type DataAdapter } from "./store/stateStore.ts";
 import { renderQuestionCard } from "./view/card.ts";
 import { RenderScope } from "./view/renderOwner.ts";
+import { closeStarSound } from "./view/starSound.ts";
 import { ZaptraceSettingsTab } from "./view/settingsTab.ts";
 import { VIEW_TYPE_ZAPTRACE, ZaptraceView } from "./view/workbenchView.ts";
 import type { PluginContext, WorkbenchHandle } from "./view/pluginContext.ts";
@@ -129,6 +132,7 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 			this.rebuildTimer = null;
 		}
 		void this.store.flush();
+		closeStarSound();
 		document.body.classList.remove("zaptrace-force-dark");
 		document.body.classList.remove("zaptrace-mubu-dark");
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_ZAPTRACE);
@@ -174,6 +178,112 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 
 	requestSave(): void {
 		this.store.markDirty();
+	}
+
+	isReadOnly(): boolean {
+		return this.store.readOnly;
+	}
+
+	/** 目标文件修改时间（epoch ms），用于「从未在插件保存过」的笔记时间回退。 */
+	getFileMtime(path: string): number | null {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return null;
+		const mtime = file.stat?.mtime;
+		return typeof mtime === "number" ? mtime : null;
+	}
+
+	/** 持久化「答案与笔记」折叠开合（按 qid） */
+	setFoldOpen(qid: string, open: boolean): void {
+		const state = this.data.questions[qid];
+		if (!state) return;
+		state.foldOpen = open;
+		this.requestSave();
+	}
+
+	/**
+	 * 保存个人笔记：重新读取最新文件 → 重新定位块 → 只替换「### 个人笔记」节。
+	 * 绝不改答案/题干/其它块；失败不写盘。
+	 */
+	async saveNotes(
+		card: QuestionCard,
+		notes: string
+	): Promise<{ ok: boolean; error?: string; changed?: boolean }> {
+		if (this.store.readOnly) return { ok: false, error: "只读模式" };
+		const file = this.app.vault.getAbstractFileByPath(card.file);
+		if (!(file instanceof TFile)) return { ok: false, error: "找不到源文件" };
+		const fresh = await this.app.vault.read(file);
+		const scanned = scanZaptraceBlocks(card.file, fresh).cards;
+		let candidates = scanned.filter((item) => item.qid === card.qid);
+		if (candidates.length === 0) candidates = scanned.filter((item) => item.line === card.line);
+		if (candidates.length === 0) {
+			return { ok: false, error: "题卡已移动或删除，请刷新索引" };
+		}
+		const target = candidates.reduce((a, b) =>
+			Math.abs(a.line - card.line) <= Math.abs(b.line - card.line) ? a : b
+		);
+		const patched = replacePersonalNotes(
+			fresh,
+			{ line: target.line, endLine: target.endLine },
+			notes
+		);
+		if (patched.error) {
+			const message =
+				patched.error === "reserved_heading_in_notes"
+					? "笔记不能包含「### 题干 / 答案 / 个人笔记 / AI 笔记」等保留标题"
+					: patched.error === "not_zaptrace"
+						? "目标块不是 zaptrace 题卡"
+						: "题卡位置无效，请刷新索引后重试";
+			return { ok: false, error: message };
+		}
+		if (patched.changed) {
+			await this.app.vault.process(file, () => patched.content);
+			const now = this.nowIso();
+			const state = ensureQuestionFromCard(this.data, target, now);
+			state.notesUpdatedAt = notes.trim() === "" ? null : now;
+			this.requestSave();
+			await this.rebuildIndex();
+		}
+		this.refreshAll();
+		return { ok: true, changed: patched.changed };
+	}
+
+	/**
+	 * 保存分类与标签：重新读取最新文件 → 重新定位块 → 只改头部
+	 * category/subject/tags 三行；失败不写盘。
+	 */
+	async saveMetadata(
+		card: QuestionCard,
+		next: { category: string; subject: string; tags: string[] }
+	): Promise<{ ok: boolean; error?: string; changed?: boolean }> {
+		if (this.store.readOnly) return { ok: false, error: "只读模式" };
+		const file = this.app.vault.getAbstractFileByPath(card.file);
+		if (!(file instanceof TFile)) return { ok: false, error: "找不到源文件" };
+		const fresh = await this.app.vault.read(file);
+		const scanned = scanZaptraceBlocks(card.file, fresh).cards;
+		let candidates = scanned.filter((item) => item.qid === card.qid || item.key === card.key);
+		if (candidates.length === 0) candidates = scanned.filter((item) => item.line === card.line);
+		if (candidates.length === 0) {
+			return { ok: false, error: "题卡已移动或删除，请刷新索引" };
+		}
+		const target = candidates.reduce((a, b) =>
+			Math.abs(a.line - card.line) <= Math.abs(b.line - card.line) ? a : b
+		);
+		const patched = patchCardMetadata(fresh, { line: target.line, endLine: target.endLine }, next);
+		if (patched.error) {
+			return {
+				ok: false,
+				error:
+					patched.error === "not_zaptrace"
+						? "目标块不是 zaptrace 题卡"
+						: "题卡位置无效，请刷新索引后重试",
+			};
+		}
+		if (!patched.changed) return { ok: true, changed: false };
+		await this.app.vault.process(file, () => patched.content);
+		await this.rebuildIndex();
+		this.refreshAll();
+		this.refreshReadingViews();
+		return { ok: true, changed: true };
 	}
 
 	refreshAll(): void {
@@ -240,6 +350,20 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 		);
 	}
 
+	/** 重渲染当前打开的阅读视图，让题卡头部/笔记的修改立刻可见。 */
+	private refreshReadingViews(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			const view = leaf.view;
+			if (view instanceof MarkdownView && view.getMode() === "preview") {
+				try {
+					view.previewMode.rerender(true);
+				} catch (error) {
+					console.error("[ZapTrace] 重渲染阅读视图失败", error);
+				}
+			}
+		}
+	}
+
 	async updateSettings(patch: Partial<ZaptraceSettings>): Promise<void> {
 		await this.saveSettings({ ...this.settings, ...patch });
 		if (patch.cardFolder !== undefined || patch.defaultSubject !== undefined) {
@@ -288,6 +412,7 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 				cardFolder: this.settings.cardFolder,
 			});
 			this.syncStates();
+			await this.maybeSeedTaxonomy();
 			this.refreshAll();
 		} catch (error) {
 			console.error("[ZapTrace] 重建索引失败", error);
@@ -295,6 +420,29 @@ export default class ZapTracePlugin extends Plugin implements PluginContext {
 		} finally {
 			this.rebuilding = false;
 		}
+	}
+
+	/** 首次有题卡且未配置分类时，从题卡一次性播种 taxonomy（只读跳过）。 */
+	private async maybeSeedTaxonomy(): Promise<void> {
+		if (this.store.readOnly) return;
+		const taxonomy = this.settings.taxonomy;
+		if (taxonomy.seeded || taxonomy.categories.length > 0) return;
+		if (this.index.cards.length === 0) return;
+		const map = new Map<string, Set<string>>();
+		for (const card of this.index.cards) {
+			const category = card.category || "数学";
+			const subjects = map.get(category) ?? new Set<string>();
+			if (card.subject) subjects.add(card.subject);
+			map.set(category, subjects);
+		}
+		const categories = [...map.entries()].map(([name, subjects]) => ({
+			name,
+			subjects: [...subjects].sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
+		}));
+		await this.saveSettings({
+			...this.settings,
+			taxonomy: { categories, seeded: true },
+		});
 	}
 
 	private scheduleRebuild(): void {

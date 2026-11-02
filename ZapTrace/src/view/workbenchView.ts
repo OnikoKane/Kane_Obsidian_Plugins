@@ -5,6 +5,7 @@ import { PracticePanel } from "./practicePanel.ts";
 import { LibraryPage } from "./libraryPanel.ts";
 import { clearElement } from "./dom.ts";
 import { closeAllMenus } from "./menu.ts";
+import { closeTagPopover } from "./tagPopover.ts";
 
 export const VIEW_TYPE_ZAPTRACE = "zaptrace-workbench";
 
@@ -120,6 +121,7 @@ export class ZaptraceView extends ItemView implements WorkbenchHandle {
 
 	async onClose(): Promise<void> {
 		closeAllMenus();
+		closeTagPopover();
 		this.unregister?.();
 		this.unregister = null;
 		clearElement(this.contentEl);

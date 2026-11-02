@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "settings": {
+    "cardFolder": "",
+    "defaultSubject": "",
+    "dateMode": "local",
+    "dailyReviewLimit": 20,
+    "requireAnswerBeforeReveal": false,
+    "livePreview": "compact",
+    "theme": "auto"
+  },
+  "questions": {
+    "demo-gaoshu-deriv-001": {
+      "id": "demo-gaoshu-deriv-001",
+      "star": false,
+      "subject": "高等数学",
+      "tags": [
+        "导数",
+        "极限"
+      ],
+      "source": "示例 · 高等数学 第七版 p.86",
+      "file": "zaptrace-demo.md",
+      "stemHash": "03153823b992",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:00:24+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false
+    },
+    "demo-linear-algebra-002": {
+      "id": "demo-linear-algebra-002",
+      "star": true,
+      "subject": "线性代数",
+      "tags": [
+        "行列式"
+      ],
+      "source": "示例 · 课堂笔记",
+      "file": "zaptrace-demo.md",
+      "stemHash": "b1c97e08e16a",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:00:24+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false
+    },
+    "demo-code-in-answer-003": {
+      "id": "demo-code-in-answer-003",
+      "star": false,
+      "subject": "离散数学",
+      "tags": [
+        "代码"
+      ],
+      "source": "",
+      "file": "zaptrace-demo.md",
+      "stemHash": "f228a443fb5c",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:00:24+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false
+    },
+    "auto:e43688ae3675": {
+      "id": "auto:e43688ae3675",
+      "star": false,
+      "subject": "概率论",
+      "tags": [
+        "概念"
+      ],
+      "source": "",
+      "file": "zaptrace-demo.md",
+      "stemHash": "e43688ae3675",
+      "firstSeenAt": "2026-11-02T15:34:13+08:00",
+      "lastSeenAt": "2026-11-02T17:00:24+08:00",
+      "step": -1,
+      "due": null,
+      "lapses": 0,
+      "reviews": [],
+      "orphaned": false
+    }
+  },
+  "reviewLog": [],
+  "meta": {
+    "lastScanAt": "2026-11-02T17:00:24+08:00",
+    "pluginVersion": "0.1.0",
+    "logTruncated": 0
+  }
+}

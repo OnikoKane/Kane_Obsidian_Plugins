@@ -11,10 +11,12 @@ let collapseSeq = 0;
 
 export interface CollapsibleOptions {
 	startsOpen?: boolean;
-	/** 右侧计数文案（如「3 行」） */
+	/** 右侧计数文案（如「答案 2 行 · 笔记 1 行」） */
 	count?: string;
 	/** 首次展开时渲染内容（懒渲染，防偷看 + 省性能） */
 	onFirstOpen?: (content: HTMLElement) => void | Promise<void>;
+	/** 用户开合时回调（用于持久化 foldOpen） */
+	onToggle?: (open: boolean) => void;
 }
 
 export interface CollapsibleHandle {
@@ -70,17 +72,25 @@ export function createCollapsible(
 
 	let loaded = false;
 	const setOpen = (open: boolean): void => {
+		const wasOpen = root.getAttribute("data-open") === "true";
 		root.setAttribute("data-open", open ? "true" : "false");
 		header.setAttribute("aria-expanded", open ? "true" : "false");
 		if (open && !loaded) {
 			loaded = true;
 			void options.onFirstOpen?.(content);
 		}
+		if (wasOpen !== open) options.onToggle?.(open);
 	};
 
 	header.addEventListener("click", () => {
 		setOpen(root.getAttribute("data-open") !== "true");
 	});
+
+	// 初始就是展开态（如题库卡 foldOpen 默认 true）时立即渲染内容
+	if (options.startsOpen) {
+		loaded = true;
+		void options.onFirstOpen?.(content);
+	}
 
 	parent.appendChild(root);
 	return {

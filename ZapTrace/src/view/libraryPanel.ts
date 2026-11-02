@@ -2,11 +2,15 @@ import { Component, setIcon } from "obsidian";
 import type { PluginContext } from "./pluginContext.ts";
 import type { CardFilter, QuestionCard, SortKey } from "../core/types.ts";
 import { emptyFilter, filterCards, sortCards } from "../core/filter.ts";
-import { clearElement, createButton } from "./dom.ts";
+import { clearElement, createButton, createCollapsible } from "./dom.ts";
 import { openMenu } from "./menu.ts";
 import { ReviewPanel } from "./reviewPanel.ts";
 import { QUESTION_TEMPLATE } from "../template.ts";
 import { toPreviewText } from "./plainText.ts";
+import { createNoteEditor } from "./noteEditor.ts";
+import { openTagPopover } from "./tagPopover.ts";
+import { openTaxonomyModal } from "./taxonomyPanel.ts";
+import { playStarClick } from "./starSound.ts";
 import {
 	dueLine,
 	libStatus,
@@ -18,8 +22,8 @@ import {
 } from "./libStatus.ts";
 
 /**
- * 题库页（DESIGN-v2 §5）：页头 / 状态 chips / 筛选 / 分段视图（题卡流 · 紧凑表格 · 独立复习）。
- * 全部基于现有数据派生，不新增字段，不写任何 Markdown。
+ * 题库页 v3（DESIGN-v3 §4）：大科目→子科目→标签联动、三列紧凑题卡、默认展开答案与笔记、就地编辑。
+ * 全部基于现有数据派生，不新增数据字段；笔记保存走 plugin.saveNotes。
  */
 
 type ViewMode = "cards" | "table" | "review";
@@ -38,9 +42,11 @@ export class LibraryPage {
 	private filter: CardFilter = emptyFilter();
 	private sort: SortKey = "due";
 	private statusFilter: StatusFilterKey = "all";
+	private categoryFilter: string | null = null;
 	private viewMode: ViewMode = "cards";
 
 	private searchInput: HTMLInputElement | null = null;
+	private categorySelect: HTMLSelectElement | null = null;
 	private subjectSelect: HTMLSelectElement | null = null;
 	private sortSelect: HTMLSelectElement | null = null;
 	private countEl: HTMLElement | null = null;
@@ -90,6 +96,12 @@ export class LibraryPage {
 		const actions = document.createElement("div");
 		actions.className = "pd-header-actions";
 		createButton(actions, {
+			label: "分类设置",
+			icon: "tags",
+			cls: "pd-btn pd-btn-small pd-taxonomy-btn",
+			onClick: () => openTaxonomyModal(this.plugin),
+		});
+		createButton(actions, {
 			label: "",
 			icon: "refresh-cw",
 			ariaLabel: "重建索引",
@@ -121,14 +133,36 @@ export class LibraryPage {
 		const filterbar = document.createElement("div");
 		filterbar.className = "pd-filterbar";
 
+		// 大科目（前置门槛）
+		const categoryField = document.createElement("label");
+		categoryField.className = "pd-field";
+		const categoryLabel = document.createElement("span");
+		categoryLabel.className = "pd-label";
+		categoryLabel.textContent = "大科目";
+		const categorySelect = document.createElement("select");
+		categorySelect.className = "pd-select";
+		categorySelect.setAttribute("aria-label", "大科目筛选");
+		categorySelect.addEventListener("change", () => {
+			this.categoryFilter = categorySelect.value === "" ? null : categorySelect.value;
+			this.filter.subject = null;
+			this.filter.tags = [];
+			this.syncSubjectOptions();
+			this.renderTagChips();
+			this.renderCards();
+			this.renderTable();
+		});
+		categoryField.append(categoryLabel, categorySelect);
+		this.categorySelect = categorySelect;
+
+		// 子科目（需先选大科目）
 		const subjectField = document.createElement("label");
 		subjectField.className = "pd-field";
 		const subjectLabel = document.createElement("span");
 		subjectLabel.className = "pd-label";
-		subjectLabel.textContent = "科目";
+		subjectLabel.textContent = "子科目";
 		const subjectSelect = document.createElement("select");
 		subjectSelect.className = "pd-select";
-		subjectSelect.setAttribute("aria-label", "科目筛选");
+		subjectSelect.setAttribute("aria-label", "子科目筛选");
 		subjectSelect.addEventListener("change", () => {
 			this.filter.subject = subjectSelect.value === "" ? null : subjectSelect.value;
 			this.renderCards();
@@ -170,7 +204,7 @@ export class LibraryPage {
 		tagsGroup.setAttribute("aria-label", "标签筛选");
 		this.tagsWrap = tagsGroup;
 
-		filterbar.append(subjectField, sortField, tagsGroup);
+		filterbar.append(categoryField, subjectField, sortField, tagsGroup);
 		const clear = createButton(filterbar, {
 			label: "清除筛选",
 			cls: "pd-btn",
@@ -251,6 +285,7 @@ export class LibraryPage {
 	refresh(): void {
 		this.syncHeader();
 		this.renderStatusChips();
+		this.syncCategoryOptions();
 		this.syncSubjectOptions();
 		this.renderTagChips();
 		this.renderCards();
@@ -354,41 +389,84 @@ export class LibraryPage {
 		}
 	}
 
-	private syncSubjectOptions(): void {
-		const select = this.subjectSelect;
+	private syncCategoryOptions(): void {
+		const select = this.categorySelect;
 		if (!select) return;
-		const current = this.filter.subject ?? "";
+		const current = this.categoryFilter ?? "";
 		clearElement(select);
 		const all = document.createElement("option");
 		all.value = "";
-		all.textContent = "全部科目";
+		all.textContent = "全部大科目";
 		select.appendChild(all);
-		const subjects = new Set<string>();
-		for (const card of this.plugin.getCards()) subjects.add(card.subject);
-		for (const subject of Array.from(subjects).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
+		for (const category of this.collectCategories()) {
 			const option = document.createElement("option");
-			option.value = subject;
-			option.textContent = subject;
+			option.value = category;
+			option.textContent = category;
 			select.appendChild(option);
 		}
 		select.value = current;
-		if (select.value !== current) this.filter.subject = null;
+		if (select.value !== current) this.categoryFilter = null;
+	}
+
+	private collectCategories(): string[] {
+		const set = new Set<string>();
+		for (const card of this.plugin.getCards()) set.add(card.category ?? "数学");
+		return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+	}
+
+	private syncSubjectOptions(): void {
+		const select = this.subjectSelect;
+		if (!select) return;
+		const enabled = this.categoryFilter !== null;
+		select.disabled = !enabled;
+		select.setAttribute("aria-disabled", String(!enabled));
+		select.title = enabled ? "" : "先选择大科目";
+		clearElement(select);
+		const all = document.createElement("option");
+		all.value = "";
+		all.textContent = enabled ? "全部子科目" : "先选择大科目";
+		select.appendChild(all);
+		if (enabled) {
+			const set = new Set<string>();
+			for (const card of this.plugin.getCards()) {
+				if (card.category === this.categoryFilter) set.add(card.subject);
+			}
+			for (const subject of Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
+				const option = document.createElement("option");
+				option.value = subject;
+				option.textContent = subject;
+				select.appendChild(option);
+			}
+		}
+		select.value = this.filter.subject ?? "";
+		if (!enabled) this.filter.subject = null;
 	}
 
 	private renderTagChips(): void {
 		const wrap = this.tagsWrap;
 		if (!wrap) return;
 		clearElement(wrap);
+		const enabled = this.categoryFilter !== null;
+		wrap.setAttribute("aria-disabled", String(!enabled));
+		wrap.title = enabled ? "" : "先选择大科目";
 		const tags = new Set<string>();
-		for (const card of this.plugin.getCards()) for (const tag of card.tags) tags.add(tag);
+		if (enabled) {
+			for (const card of this.plugin.getCards()) {
+				if (card.category === this.categoryFilter) {
+					for (const tag of card.tags) tags.add(tag);
+				}
+			}
+		}
 		for (const tag of Array.from(tags).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
 			const chip = document.createElement("button");
 			chip.type = "button";
 			chip.className = "pd-chip pd-chip-tag";
 			chip.textContent = tag;
+			chip.disabled = !enabled;
 			const active = this.filter.tags.includes(tag);
 			chip.setAttribute("aria-pressed", String(active));
 			chip.addEventListener("click", () => {
+				if (!enabled) return;
 				this.filter.tags = active
 					? this.filter.tags.filter((item) => item !== tag)
 					: [...this.filter.tags, tag];
@@ -404,10 +482,11 @@ export class LibraryPage {
 		this.filter = emptyFilter();
 		this.statusFilter = "all";
 		this.sort = "due";
+		this.categoryFilter = null;
 		if (this.searchInput) this.searchInput.value = "";
-		if (this.subjectSelect) this.subjectSelect.value = "";
 		if (this.sortSelect) this.sortSelect.value = "due";
 		this.renderStatusChips();
+		this.syncCategoryOptions();
 		this.syncSubjectOptions();
 		this.renderTagChips();
 		this.renderCards();
@@ -418,9 +497,12 @@ export class LibraryPage {
 
 	private computeFiltered(): QuestionCard[] {
 		const today = this.plugin.today();
-		const cards = this.plugin
-			.getCards()
-			.filter((card) => matchesStatus(card, this.plugin.getState(card.qid), this.statusFilter, today));
+		const byCategory = this.categoryFilter
+			? this.plugin.getCards().filter((card) => card.category === this.categoryFilter)
+			: this.plugin.getCards();
+		const cards = byCategory.filter((card) =>
+			matchesStatus(card, this.plugin.getState(card.qid), this.statusFilter, today)
+		);
 		const filtered = filterCards(cards, this.plugin.data, this.filter, today);
 		return sortCards(filtered, this.plugin.data, this.sort, today);
 	}
@@ -438,7 +520,12 @@ export class LibraryPage {
 			return;
 		}
 		if (cards.length === 0) {
-			this.renderEmpty(grid, "没有符合条件的题。", false);
+			const message =
+				this.categoryFilter !== null &&
+				this.plugin.getCards().some((card) => card.category === this.categoryFilter)
+					? "该大科目下暂无题目"
+					: "没有符合条件的题。";
+			this.renderEmpty(grid, message, false);
 			return;
 		}
 		let index = 0;
@@ -458,22 +545,33 @@ export class LibraryPage {
 		qcard.dataset.qid = card.qid;
 		qcard.setAttribute("role", "listitem");
 
-		const main = document.createElement("div");
-		main.className = "pd-qcard-main";
-		main.setAttribute("role", "button");
-		main.tabIndex = 0;
+		// 点击区（与折叠/星标分离，避免嵌套交互）
+		const open = document.createElement("div");
+		open.className = "pd-qcard-open";
+		open.setAttribute("role", "button");
+		open.tabIndex = 0;
 		const preview = toPreviewText(card.stem) || "（空题干）";
-		main.setAttribute("aria-label", `练习：${preview.slice(0, 30)}`);
+		open.setAttribute("aria-label", `练习：${preview.slice(0, 30)}`);
+		const onOpen = (): void => {
+			void this.plugin.startPractice([card]);
+		};
+		open.addEventListener("click", onOpen);
+		open.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" || event.key === " ") {
+				event.preventDefault();
+				onOpen();
+			}
+		});
 
 		const head = document.createElement("div");
 		head.className = "pd-qcard-head";
 		head.appendChild(this.buildTags(card));
-		main.appendChild(head);
+		open.appendChild(head);
 
 		const stem = document.createElement("div");
 		stem.className = "pd-qcard-stem";
 		stem.textContent = preview;
-		main.appendChild(stem);
+		open.appendChild(stem);
 
 		const foot = document.createElement("div");
 		foot.className = "pd-qcard-foot";
@@ -481,37 +579,54 @@ export class LibraryPage {
 		const chip = document.createElement("span");
 		chip.className = `pd-status ${badge.cls}`;
 		chip.textContent = badge.text;
+		const dueText = dueLine(state, today);
 		const due = document.createElement("span");
 		due.className = "pd-qcard-due";
-		due.textContent = dueLine(state, today);
+		due.textContent = dueText;
 		const source = document.createElement("span");
 		source.className = "pd-qcard-source";
 		source.textContent = card.source ? `出处：${card.source}` : card.pdf ? "PDF" : "";
-		foot.append(chip, due, source);
-		main.appendChild(foot);
-		main.addEventListener("click", () => {
-			void this.plugin.startPractice([card]);
-		});
-		main.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" || event.key === " ") {
-				event.preventDefault();
-				void this.plugin.startPractice([card]);
-			}
-		});
+		foot.append(chip);
+		if (dueText) foot.appendChild(due);
+		foot.appendChild(source);
+		open.appendChild(foot);
 
+		// 工具：常驻星标 + ⋯
 		const tools = document.createElement("div");
 		tools.className = "pd-qcard-tools";
-		const detail = document.createElement("button");
-		detail.type = "button";
-		detail.className = "pd-qcard-detail";
-		detail.textContent = "查看详情";
-		detail.addEventListener("click", (event) => {
+		const tagBtn = document.createElement("button");
+		tagBtn.type = "button";
+		tagBtn.className = "pd-icon-btn pd-tag-btn";
+		tagBtn.setAttribute("aria-label", "编辑标签");
+		tagBtn.setAttribute("aria-haspopup", "dialog");
+		tagBtn.setAttribute("aria-expanded", "false");
+		setIcon(tagBtn, "tags");
+		tagBtn.addEventListener("click", (event) => {
 			event.stopPropagation();
-			void this.plugin.openSource(card);
+			openTagPopover(tagBtn, this.plugin, card);
+		});
+		const starred = state?.star ?? card.starInitial;
+		const star = document.createElement("button");
+		star.type = "button";
+		star.className = "pd-icon-btn pd-star" + (starred ? " is-active" : "");
+		star.setAttribute("aria-label", starred ? "取消收藏" : "收藏");
+		star.setAttribute("aria-pressed", String(starred));
+		setIcon(star, "star");
+		star.addEventListener("click", (event) => {
+			event.stopPropagation();
+			const next = this.plugin.toggleStar(card.qid);
+			star.classList.toggle("is-active", next);
+			star.setAttribute("aria-pressed", String(next));
+			star.setAttribute("aria-label", next ? "取消收藏" : "收藏");
+			this.plugin.requestSave();
+			if (next) playStarClick();
+			this.renderStatusChips();
+			this.renderCards();
+			this.renderTable();
 		});
 		const more = document.createElement("button");
 		more.type = "button";
-		more.className = "pd-icon-btn";
+		more.className = "pd-icon-btn pd-more-btn";
 		more.setAttribute("aria-label", "更多操作");
 		more.setAttribute("aria-haspopup", "menu");
 		setIcon(more, "more-horizontal");
@@ -519,9 +634,28 @@ export class LibraryPage {
 			event.stopPropagation();
 			this.openCardMenu(more, card);
 		});
-		tools.append(detail, more);
+		tools.append(tagBtn, star, more);
 
-		qcard.append(main, tools);
+		// 折叠：答案与笔记（默认展开）
+		const foldWrap = document.createElement("div");
+		foldWrap.className = "pd-qcard-fold";
+		const openState = state?.foldOpen ?? true;
+		const answerText = toPreviewText(card.answer, 220) || "（无答案）";
+		const noteLines = card.notes.split(/\r?\n/).filter((line) => line.trim() !== "").length;
+		createCollapsible(foldWrap, "答案与笔记", {
+			count: noteLines > 0 ? `答案 · 笔记 ${noteLines} 行` : "答案",
+			startsOpen: openState,
+			onToggle: (openFlag) => this.plugin.setFoldOpen(card.qid, openFlag),
+			onFirstOpen: (content) => {
+				const answer = document.createElement("div");
+				answer.className = "pd-qcard-answer";
+				answer.textContent = answerText;
+				content.appendChild(answer);
+				content.appendChild(createNoteEditor(this.plugin, card, content, { compact: true }));
+			},
+		});
+
+		qcard.append(open, tools, foldWrap);
 		return qcard;
 	}
 
@@ -572,6 +706,7 @@ export class LibraryPage {
 			star.classList.toggle("is-active", next);
 			star.setAttribute("aria-pressed", String(next));
 			this.plugin.requestSave();
+			if (next) playStarClick();
 			this.renderStatusChips();
 			this.renderCards();
 			this.renderTable();
@@ -590,7 +725,7 @@ export class LibraryPage {
 
 		const subject = document.createElement("span");
 		subject.className = "pd-trow-meta";
-		subject.textContent = card.subject;
+		subject.textContent = `${card.category ?? "数学"} · ${card.subject}`;
 		const tags = document.createElement("span");
 		tags.className = "pd-trow-meta";
 		tags.textContent = card.tags.slice(0, 2).join(" · ");
@@ -633,6 +768,13 @@ export class LibraryPage {
 				},
 			},
 			{
+				label: "编辑标签",
+				icon: "tags",
+				onSelect: () => {
+					openTagPopover(anchor, this.plugin, card);
+				},
+			},
+			{
 				label: "打开原文",
 				icon: "external-link",
 				onSelect: () => {
@@ -652,11 +794,15 @@ export class LibraryPage {
 	private buildTags(card: QuestionCard): HTMLElement {
 		const tags = document.createElement("div");
 		tags.className = "pd-tags";
+		const category = document.createElement("span");
+		category.className = "pd-tag is-category";
+		category.textContent = card.category || "数学";
+		tags.appendChild(category);
 		const subject = document.createElement("span");
 		subject.className = "pd-tag is-subject";
 		subject.textContent = card.subject || "未分类";
 		tags.appendChild(subject);
-		const topics = card.tags.slice(0, 3);
+		const topics = card.tags.slice(0, 2);
 		for (const tag of topics) {
 			const chip = document.createElement("span");
 			chip.className = "pd-tag is-topic";

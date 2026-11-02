@@ -21,6 +21,7 @@ const SECTION_RE = /^\s*#{3,}\s*(题干|答案|个人笔记|AI\s*笔记)\s*$/;
 
 const KNOWN_KEYS = new Set([
 	"id",
+	"category",
 	"subject",
 	"tags",
 	"source",
@@ -238,6 +239,7 @@ export function parseBlockInner(
 		qid: explicitId ?? deriveQid(stem),
 		explicitId,
 		duplicateId: false,
+		category: headerMap.get("category")?.trim() ?? "",
 		subject: subjectRaw,
 		tags: splitTags(headerMap.get("tags") ?? ""),
 		source: headerMap.get("source")?.trim() ?? "",

@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type ZapTracePlugin from "../main.ts";
+import { openTaxonomyModal } from "./taxonomyPanel.ts";
 
 /** 设置页（DESIGN §12.2）。 */
 export class ZaptraceSettingsTab extends PluginSettingTab {
@@ -21,6 +22,13 @@ export class ZaptraceSettingsTab extends PluginSettingTab {
 				"当前为只读模式（data.json 版本高于插件或结构损坏），设置与评分不会保存。请先备份并修复 data.json。"
 			);
 		}
+
+		new Setting(containerEl)
+			.setName("分类设置")
+			.setDesc("管理大科目与子科目；只影响标签编辑器里的可选项，不改写已有题卡。")
+			.addButton((button) =>
+				button.setButtonText("编辑分类").onClick(() => openTaxonomyModal(this.plugin))
+			);
 
 		new Setting(containerEl)
 			.setName("题卡目录")

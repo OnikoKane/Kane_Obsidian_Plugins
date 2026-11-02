@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => ZapTracePlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian9 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/core/hash.ts
 function sha1Hex(input) {
@@ -117,6 +117,7 @@ var KEY_VALUE_RE = /^([A-Za-z][A-Za-z0-9_-]*)[ \t]*:[ \t]*(.*)$/;
 var SECTION_RE = /^\s*#{3,}\s*(题干|答案|个人笔记|AI\s*笔记)\s*$/;
 var KNOWN_KEYS = /* @__PURE__ */ new Set([
   "id",
+  "category",
   "subject",
   "tags",
   "source",
@@ -282,6 +283,7 @@ function parseBlockInner(file, rawInnerLines, startLine, endLine, options = {}) 
     qid: explicitId ?? deriveQid(stem),
     explicitId,
     duplicateId: false,
+    category: headerMap.get("category")?.trim() ?? "",
     subject: subjectRaw,
     tags: splitTags(headerMap.get("tags") ?? ""),
     source: headerMap.get("source")?.trim() ?? "",
@@ -413,6 +415,7 @@ function buildIndex(files, options = {}) {
       const fallback = options.defaultSubject?.trim() ?? "";
       rawCards.push({
         ...card,
+        category: card.category || "\u6570\u5B66",
         subject: card.subject || fallback || subjectFromPath(card.file)
       });
     }
@@ -420,11 +423,13 @@ function buildIndex(files, options = {}) {
   const cards = dedupeCards(rawCards);
   const byKey = /* @__PURE__ */ new Map();
   const byQid = /* @__PURE__ */ new Map();
+  const categories = /* @__PURE__ */ new Set();
   const subjects = /* @__PURE__ */ new Set();
   const tags = /* @__PURE__ */ new Set();
   for (const card of cards) {
     byKey.set(card.key, card);
     byQid.set(card.qid, card);
+    categories.add(card.category ?? "\u6570\u5B66");
     subjects.add(card.subject);
     for (const tag of card.tags)
       tags.add(tag);
@@ -433,6 +438,7 @@ function buildIndex(files, options = {}) {
     cards,
     byKey,
     byQid,
+    categories: Array.from(categories).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
     subjects: Array.from(subjects).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
     tags: Array.from(tags).sort((a, b) => a.localeCompare(b, "zh-Hans-CN")),
     scannedFiles: filtered.length,
@@ -444,6 +450,7 @@ function emptyIndex() {
     cards: [],
     byKey: /* @__PURE__ */ new Map(),
     byQid: /* @__PURE__ */ new Map(),
+    categories: [],
     subjects: [],
     tags: [],
     scannedFiles: 0,
@@ -558,6 +565,88 @@ function previewDays(step, rating) {
   return applyRating(step, rating).days;
 }
 
+// src/core/taxonomy.ts
+function createDefaultTaxonomy() {
+  return { categories: [], seeded: false };
+}
+function asRecord(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
+  return value;
+}
+function cleanName(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+function normalizeSubjects(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const item of raw) {
+    const name = cleanName(item);
+    if (name === "" || seen.has(name))
+      continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+function normalizeCategory(raw) {
+  if (typeof raw === "string") {
+    const name2 = raw.trim();
+    return name2 === "" ? null : { name: name2, subjects: [] };
+  }
+  const record = asRecord(raw);
+  if (!record)
+    return null;
+  const name = cleanName(record.name);
+  if (name === "")
+    return null;
+  const extra = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (key !== "name" && key !== "subjects")
+      extra[key] = value;
+  }
+  return { ...extra, name, subjects: normalizeSubjects(record.subjects) };
+}
+function normalizeTaxonomy(raw) {
+  const result = createDefaultTaxonomy();
+  let items = [];
+  let seeded = false;
+  if (Array.isArray(raw)) {
+    items = raw;
+  } else {
+    const record = asRecord(raw);
+    if (!record)
+      return result;
+    items = Array.isArray(record.categories) ? record.categories : [];
+    seeded = typeof record.seeded === "boolean" ? record.seeded : false;
+    for (const [key, value] of Object.entries(record)) {
+      if (key !== "categories" && key !== "seeded")
+        result[key] = value;
+    }
+  }
+  const byName = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    const category = normalizeCategory(item);
+    if (!category)
+      continue;
+    const existing = byName.get(category.name);
+    if (existing) {
+      const union = /* @__PURE__ */ new Set([...existing.subjects, ...category.subjects]);
+      existing.subjects = [...union];
+    } else {
+      byName.set(category.name, category);
+    }
+  }
+  result.categories = [...byName.values()];
+  result.seeded = seeded;
+  return result;
+}
+function taxonomySubjects(taxonomy, category) {
+  return taxonomy.categories.find((item) => item.name === category)?.subjects ?? [];
+}
+
 // src/core/state.ts
 var CURRENT_SCHEMA_VERSION = 1;
 var MAX_REVIEW_LOG = 5e3;
@@ -569,12 +658,13 @@ var DEFAULT_SETTINGS = {
   dailyReviewLimit: 20,
   requireAnswerBeforeReveal: false,
   livePreview: "compact",
-  theme: "auto"
+  theme: "auto",
+  taxonomy: createDefaultTaxonomy()
 };
 function createDefaultData(pluginVersion) {
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    settings: { ...DEFAULT_SETTINGS },
+    settings: { ...DEFAULT_SETTINGS, taxonomy: createDefaultTaxonomy() },
     questions: {},
     reviewLog: [],
     meta: {
@@ -584,7 +674,7 @@ function createDefaultData(pluginVersion) {
     }
   };
 }
-function asRecord(value) {
+function asRecord2(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return null;
   return value;
@@ -607,7 +697,7 @@ function isRating(value) {
   return typeof value === "string" && RATINGS.includes(value);
 }
 function normalizeSettings(raw) {
-  const record = asRecord(raw) ?? {};
+  const record = asRecord2(raw) ?? {};
   const merged = { ...DEFAULT_SETTINGS };
   merged.cardFolder = asString(record.cardFolder, merged.cardFolder).trim();
   merged.defaultSubject = asString(record.defaultSubject, merged.defaultSubject).trim();
@@ -623,6 +713,7 @@ function normalizeSettings(raw) {
   merged.livePreview = live === "source" ? "source" : "compact";
   const theme = asString(record.theme, merged.theme);
   merged.theme = theme === "mubu-dark" ? "mubu-dark" : "auto";
+  merged.taxonomy = normalizeTaxonomy(record.taxonomy);
   const knownSettings = new Set(Object.keys(DEFAULT_SETTINGS));
   for (const [key, value] of Object.entries(record)) {
     if (!knownSettings.has(key))
@@ -631,7 +722,7 @@ function normalizeSettings(raw) {
   return merged;
 }
 function normalizeReviewEntry(raw) {
-  const record = asRecord(raw);
+  const record = asRecord2(raw);
   if (!record)
     return null;
   if (!isRating(record.rating))
@@ -644,7 +735,7 @@ function normalizeReviewEntry(raw) {
   return { at, rating: record.rating, days, due };
 }
 function normalizeQuestionState(qid, raw, nowIso) {
-  const record = asRecord(raw) ?? {};
+  const record = asRecord2(raw) ?? {};
   const reviewsRaw = Array.isArray(record.reviews) ? record.reviews : [];
   const reviews = reviewsRaw.map(normalizeReviewEntry).filter((entry) => entry !== null).slice(-MAX_REVIEWS_PER_QUESTION);
   const dueRaw = asString(record.due, "");
@@ -664,8 +755,11 @@ function normalizeQuestionState(qid, raw, nowIso) {
     due: isValidDateString(dueRaw) ? dueRaw : null,
     lapses: Math.max(0, asInt(record.lapses, 0)),
     reviews,
-    orphaned: asBool(record.orphaned, false)
+    orphaned: asBool(record.orphaned, false),
+    notesUpdatedAt: typeof record.notesUpdatedAt === "string" && record.notesUpdatedAt !== "" ? record.notesUpdatedAt : null
   };
+  if (typeof record.foldOpen === "boolean")
+    state.foldOpen = record.foldOpen;
   const knownState = /* @__PURE__ */ new Set([
     "id",
     "star",
@@ -680,7 +774,9 @@ function normalizeQuestionState(qid, raw, nowIso) {
     "due",
     "lapses",
     "reviews",
-    "orphaned"
+    "orphaned",
+    "notesUpdatedAt",
+    "foldOpen"
   ]);
   for (const [key, value] of Object.entries(record)) {
     if (!knownState.has(key))
@@ -689,7 +785,7 @@ function normalizeQuestionState(qid, raw, nowIso) {
   return state;
 }
 function normalizeReviewLogEntry(raw) {
-  const record = asRecord(raw);
+  const record = asRecord2(raw);
   if (!record)
     return null;
   if (!isRating(record.rating))
@@ -721,7 +817,7 @@ function migrateData(raw, pluginVersion) {
       issues
     };
   }
-  const record = asRecord(raw);
+  const record = asRecord2(raw);
   if (!record) {
     issues.push("data.json \u9876\u5C42\u4E0D\u662F\u5BF9\u8C61\uFF0C\u5DF2\u8FDB\u5165\u5B89\u5168\u6A21\u5F0F\uFF08\u53EA\u8BFB\u7D22\u5F15\uFF0C\u4E0D\u5199\u72B6\u6001\uFF09");
     return {
@@ -768,7 +864,7 @@ function migrateData(raw, pluginVersion) {
     }
   }
   const settings = normalizeSettings(working.settings);
-  const questionsRecord = asRecord(working.questions);
+  const questionsRecord = asRecord2(working.questions);
   const questions = {};
   let structurallyInvalid = false;
   if (working.questions !== void 0 && questionsRecord === null) {
@@ -783,7 +879,7 @@ function migrateData(raw, pluginVersion) {
   }
   const reviewLogRaw = Array.isArray(working.reviewLog) ? working.reviewLog : [];
   const reviewLog = reviewLogRaw.map(normalizeReviewLogEntry).filter((entry) => entry !== null);
-  const metaRecord = asRecord(working.meta) ?? {};
+  const metaRecord = asRecord2(working.meta) ?? {};
   const meta = {
     lastScanAt: typeof metaRecord.lastScanAt === "string" ? metaRecord.lastScanAt : null,
     pluginVersion,
@@ -848,7 +944,8 @@ function ensureQuestionFromCard(data, card, nowIso) {
       due: null,
       lapses: 0,
       reviews: [],
-      orphaned: false
+      orphaned: false,
+      notesUpdatedAt: null
     };
     data.questions[card.qid] = created;
     return created;
@@ -867,17 +964,17 @@ function markOrphans(data, liveQids) {
     state.orphaned = !liveQids.has(qid);
   }
 }
-function recordReview(data, card, rating, ctx) {
-  const state = ensureQuestionFromCard(data, card, ctx.at);
+function recordReview(data, card, rating, ctx2) {
+  const state = ensureQuestionFromCard(data, card, ctx2.at);
   const outcome = applyRating(state.step, rating);
-  const due = addDays(ctx.today, outcome.days);
+  const due = addDays(ctx2.today, outcome.days);
   state.step = outcome.step;
   state.due = due;
   if (outcome.lapse)
     state.lapses += 1;
-  state.lastSeenAt = ctx.at;
+  state.lastSeenAt = ctx2.at;
   const entry = {
-    at: ctx.at,
+    at: ctx2.at,
     rating,
     days: outcome.days,
     due
@@ -888,13 +985,319 @@ function recordReview(data, card, rating, ctx) {
   }
   data.reviewLog.push({
     qid: card.qid,
-    at: ctx.at,
+    at: ctx2.at,
     rating,
-    elapsedMs: ctx.elapsedMs,
+    elapsedMs: ctx2.elapsedMs,
     subject: card.subject
   });
   pruneReviewLog(data);
   return { state, days: outcome.days, due };
+}
+
+// src/core/notes.ts
+var FENCE_RE = /^\s*`{3,}\s*zaptrace\s*$/i;
+var SECTION_RE2 = /^(\s*)#{3,}\s*(题干|答案|个人笔记|AI\s*笔记)\s*$/;
+function tokenize(markdown) {
+  const lines = [];
+  const re = /([^\r\n]*)(\r\n|\n|\r)/g;
+  let match;
+  let lastIndex = 0;
+  while ((match = re.exec(markdown)) !== null) {
+    lines.push({ text: match[1], eol: match[2] });
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < markdown.length) {
+    lines.push({ text: markdown.slice(lastIndex), eol: "" });
+  }
+  return lines;
+}
+function dominantEol(lines, start, end) {
+  for (let i = start; i < end; i++) {
+    if (lines[i].eol !== "")
+      return lines[i].eol;
+  }
+  return "\n";
+}
+function trimmedNoteLines(notes) {
+  const normalized = notes.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start].trim() === "")
+    start++;
+  while (end > start && lines[end - 1].trim() === "")
+    end--;
+  return lines.slice(start, end);
+}
+function buildSectionLines(indent, notes, eol, trailingBlank) {
+  const body = trimmedNoteLines(notes);
+  if (body.length === 0)
+    return [{ text: "", eol }];
+  const result = [{ text: "", eol }];
+  for (const line of body) {
+    result.push({ text: line.trim() === "" ? "" : `${indent}${line}`, eol });
+  }
+  if (trailingBlank)
+    result.push({ text: "", eol });
+  return result;
+}
+function replacePersonalNotes(markdown, ref, notes) {
+  const unchanged = { content: markdown, changed: false };
+  if (!Number.isInteger(ref.line) || !Number.isInteger(ref.endLine)) {
+    return { ...unchanged, error: "block_not_found" };
+  }
+  const lines = tokenize(markdown);
+  const startIndex = ref.line - 1;
+  if (startIndex < 0 || startIndex >= lines.length) {
+    return { ...unchanged, error: "block_not_found" };
+  }
+  if (!FENCE_RE.test(lines[startIndex].text)) {
+    return { ...unchanged, error: "not_zaptrace" };
+  }
+  if (ref.endLine <= ref.line) {
+    return { ...unchanged, error: "block_not_found" };
+  }
+  const innerStart = startIndex + 1;
+  const innerEnd = Math.min(ref.endLine - 1, lines.length);
+  if (innerEnd < innerStart)
+    return { ...unchanged, error: "block_not_found" };
+  const rawNotes = notes.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (rawNotes.split("\n").some((line) => SECTION_RE2.test(line))) {
+    return { ...unchanged, error: "reserved_heading_in_notes" };
+  }
+  const sections = [];
+  for (let i = innerStart; i < innerEnd; i++) {
+    const match = SECTION_RE2.exec(lines[i].text);
+    if (match) {
+      sections.push({ index: i, indent: match[1], name: match[2].replace(/\s+/g, "") });
+    }
+  }
+  const eol = dominantEol(lines, innerStart, innerEnd);
+  const notesSection = sections.find((section) => section.name === "\u4E2A\u4EBA\u7B14\u8BB0");
+  let resultLines;
+  if (notesSection) {
+    let contentEnd = innerEnd;
+    for (const section of sections) {
+      if (section.index > notesSection.index) {
+        contentEnd = section.index;
+        break;
+      }
+    }
+    const replacement = buildSectionLines(
+      notesSection.indent,
+      notes,
+      eol,
+      contentEnd < innerEnd
+    );
+    resultLines = [
+      ...lines.slice(0, notesSection.index + 1),
+      ...replacement,
+      ...lines.slice(contentEnd)
+    ];
+  } else {
+    if (notes.trim() === "")
+      return unchanged;
+    const answer = sections.find((section) => section.name === "\u7B54\u6848");
+    let insertAt = innerEnd;
+    let indent = "";
+    if (answer) {
+      indent = answer.indent;
+      insertAt = innerEnd;
+      for (const section of sections) {
+        if (section.index > answer.index) {
+          insertAt = section.index;
+          break;
+        }
+      }
+    } else {
+      const leading = /^\s*/.exec(lines[startIndex].text);
+      indent = leading ? leading[0] : "";
+    }
+    const body = trimmedNoteLines(notes);
+    const block = [
+      { text: "", eol },
+      { text: `${indent}### \u4E2A\u4EBA\u7B14\u8BB0`, eol },
+      { text: "", eol },
+      ...body.map((line) => ({ text: line.trim() === "" ? "" : `${indent}${line}`, eol })),
+      { text: "", eol }
+    ];
+    resultLines = [...lines.slice(0, insertAt), ...block, ...lines.slice(insertAt)];
+  }
+  const content = resultLines.map((line) => line.text + line.eol).join("");
+  return { content, changed: content !== markdown };
+}
+
+// src/core/metadata.ts
+var FENCE_RE2 = /^\s*`{3,}\s*zaptrace\s*$/i;
+var KEY_VALUE_RE2 = /^(\s*)([A-Za-z][A-Za-z0-9_-]*)(\s*:\s*)(.*)$/;
+function tokenize2(markdown) {
+  const lines = [];
+  const re = /([^\r\n]*)(\r\n|\n|\r)/g;
+  let match;
+  let lastIndex = 0;
+  while ((match = re.exec(markdown)) !== null) {
+    lines.push({ text: match[1], eol: match[2] });
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < markdown.length) {
+    lines.push({ text: markdown.slice(lastIndex), eol: "" });
+  }
+  return lines;
+}
+function dominantEol2(lines, start, end) {
+  for (let i = start; i < end; i++) {
+    if (lines[i].eol !== "")
+      return lines[i].eol;
+  }
+  return "\n";
+}
+function leadingIndent(text) {
+  const match = /^\s*/.exec(text);
+  return match ? match[0] : "";
+}
+function normalizeValue(value) {
+  return value.replace(/\r?\n|\r/g, " ").trim();
+}
+function joinTags(tags) {
+  return tags.join(", ");
+}
+function patchCardMetadata(markdown, ref, next) {
+  const unchanged = { content: markdown, changed: false };
+  if (!Number.isInteger(ref.line) || !Number.isInteger(ref.endLine)) {
+    return { ...unchanged, error: "block_not_found" };
+  }
+  const lines = tokenize2(markdown);
+  const startIndex = ref.line - 1;
+  if (startIndex < 0 || startIndex >= lines.length) {
+    return { ...unchanged, error: "block_not_found" };
+  }
+  if (!FENCE_RE2.test(lines[startIndex].text)) {
+    return { ...unchanged, error: "not_zaptrace" };
+  }
+  if (ref.endLine <= ref.line)
+    return { ...unchanged, error: "block_not_found" };
+  const innerStart = startIndex + 1;
+  const innerEnd = Math.min(ref.endLine - 1, lines.length);
+  if (innerEnd < innerStart)
+    return { ...unchanged, error: "block_not_found" };
+  const category = normalizeValue(next.category);
+  const subject = normalizeValue(next.subject);
+  const tags = [
+    ...new Set(next.tags.map((tag) => tag.trim()).filter((tag) => tag !== ""))
+  ];
+  const allEmpty = category === "" && subject === "" && tags.length === 0;
+  const eol = dominantEol2(lines, innerStart, innerEnd);
+  const fenceIndent = leadingIndent(lines[startIndex].text);
+  let first = -1;
+  for (let i = innerStart; i < innerEnd; i++) {
+    if (lines[i].text.trim() !== "") {
+      first = i;
+      break;
+    }
+  }
+  const hasHeader = first >= 0 && KEY_VALUE_RE2.test(lines[first].text);
+  if (!hasHeader) {
+    if (allEmpty)
+      return unchanged;
+    const headerLines = [];
+    const push = (key, value) => {
+      headerLines.push({ text: `${fenceIndent}${key}: ${value}`, eol });
+    };
+    if (category !== "")
+      push("category", category);
+    if (subject !== "")
+      push("subject", subject);
+    if (tags.length > 0)
+      push("tags", joinTags(tags));
+    headerLines.push({ text: `${fenceIndent}---`, eol });
+    headerLines.push({ text: "", eol });
+    const content2 = [...lines.slice(0, innerStart), ...headerLines, ...lines.slice(innerStart)].map((line) => line.text + line.eol).join("");
+    return { content: content2, changed: content2 !== markdown };
+  }
+  const keyIndices = [];
+  const keyNames = [];
+  let dashIndex = -1;
+  let headerEnd = innerEnd;
+  for (let i = first; i < innerEnd; i++) {
+    const text = lines[i].text;
+    if (text.trim() === "")
+      continue;
+    if (text.trim() === "---") {
+      dashIndex = i;
+      headerEnd = i;
+      break;
+    }
+    const match = KEY_VALUE_RE2.exec(text);
+    if (!match) {
+      headerEnd = i;
+      break;
+    }
+    keyIndices.push(i);
+    keyNames.push(match[2].toLowerCase());
+  }
+  if (keyIndices.length === 0)
+    return unchanged;
+  const headerIndent = leadingIndent(lines[keyIndices[0]].text);
+  const deletions = /* @__PURE__ */ new Set();
+  const replacements = /* @__PURE__ */ new Map();
+  const insertions = [];
+  const fields = [
+    { key: "category", value: category },
+    { key: "subject", value: subject },
+    { key: "tags", value: tags.length > 0 ? joinTags(tags) : "" }
+  ];
+  for (const field of fields) {
+    const index = keyNames.indexOf(field.key);
+    if (field.value !== "") {
+      if (index >= 0) {
+        const lineIndex = keyIndices[index];
+        const match = KEY_VALUE_RE2.exec(lines[lineIndex].text);
+        if (match) {
+          replacements.set(lineIndex, `${match[1]}${match[2]}${match[3]}${field.value}`);
+        }
+      } else {
+        insertions.push({ key: field.key, value: field.value });
+      }
+    } else if (index >= 0) {
+      deletions.add(keyIndices[index]);
+    }
+  }
+  const remainingKeys = keyIndices.filter((index) => !deletions.has(index));
+  let anchor;
+  let insertIndex;
+  if (remainingKeys.length > 0) {
+    anchor = remainingKeys[remainingKeys.length - 1];
+    insertIndex = anchor + 1;
+  } else {
+    anchor = first;
+    insertIndex = first;
+  }
+  if (remainingKeys.length === 0 && dashIndex >= 0) {
+    deletions.add(dashIndex);
+  }
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (insertIndex === i && insertions.length > 0) {
+      for (const item of insertions) {
+        out.push({ text: `${headerIndent}${item.key}: ${item.value}`, eol });
+      }
+    }
+    if (deletions.has(i))
+      continue;
+    const replacement = replacements.get(i);
+    if (replacement !== void 0) {
+      out.push({ text: replacement, eol: lines[i].eol });
+    } else {
+      out.push(lines[i]);
+    }
+  }
+  if (insertIndex >= lines.length && insertions.length > 0) {
+    for (const item of insertions) {
+      out.push({ text: `${headerIndent}${item.key}: ${item.value}`, eol });
+    }
+  }
+  const content = out.map((line) => line.text + line.eol).join("");
+  return { content, changed: content !== markdown };
 }
 
 // src/store/stateStore.ts
@@ -983,7 +1386,7 @@ var StateStore = class {
 };
 
 // src/view/card.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/view/dom.ts
 var import_obsidian = require("obsidian");
@@ -1021,16 +1424,23 @@ function createCollapsible(parent, label, options = {}) {
   root.append(header, bodyWrap);
   let loaded = false;
   const setOpen = (open) => {
+    const wasOpen = root.getAttribute("data-open") === "true";
     root.setAttribute("data-open", open ? "true" : "false");
     header.setAttribute("aria-expanded", open ? "true" : "false");
     if (open && !loaded) {
       loaded = true;
       void options.onFirstOpen?.(content);
     }
+    if (wasOpen !== open)
+      options.onToggle?.(open);
   };
   header.addEventListener("click", () => {
     setOpen(root.getAttribute("data-open") !== "true");
   });
+  if (options.startsOpen) {
+    loaded = true;
+    void options.onFirstOpen?.(content);
+  }
   parent.appendChild(root);
   return {
     root,
@@ -1266,9 +1676,532 @@ function toPreviewText(text, maxLength = 180) {
   return out.length > maxLength ? `${out.slice(0, maxLength)}\u2026` : out;
 }
 
+// src/view/noteEditor.ts
+var noteSeq = 0;
+function pad22(value) {
+  return value < 10 ? `0${value}` : String(value);
+}
+function formatTime(value) {
+  if (value === null || value === void 0 || value === "")
+    return "";
+  if (typeof value === "number") {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+      return "";
+    return `\u66F4\u65B0\u4E8E ${date.getFullYear()}-${pad22(date.getMonth() + 1)}-${pad22(
+      date.getDate()
+    )} ${pad22(date.getHours())}:${pad22(date.getMinutes())}`;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return `\u66F4\u65B0\u4E8E ${value.slice(0, 16).replace("T", " ")}`;
+  }
+  return `\u66F4\u65B0\u4E8E ${parsed.getFullYear()}-${pad22(parsed.getMonth() + 1)}-${pad22(
+    parsed.getDate()
+  )} ${pad22(parsed.getHours())}:${pad22(parsed.getMinutes())}`;
+}
+function createNoteEditor(plugin, card, parent, options = {}) {
+  const root = document.createElement("div");
+  root.className = "pd-note-block" + (options.compact ? " pd-note-block-compact" : "");
+  const head = document.createElement("div");
+  head.className = "pd-note-head";
+  const label = document.createElement("label");
+  label.className = "pd-note-label";
+  label.textContent = "\u4E2A\u4EBA\u7B14\u8BB0";
+  const id = `zt-note-${++noteSeq}`;
+  label.htmlFor = id;
+  const time = document.createElement("span");
+  time.className = "pd-note-time";
+  head.append(label, time);
+  const textarea = document.createElement("textarea");
+  textarea.className = "pd-note-input";
+  textarea.id = id;
+  textarea.value = card.notes;
+  textarea.placeholder = "\u5199\u70B9\u4EC0\u4E48\u2026\uFF08\u652F\u6301 Markdown \u4E0E $\u516C\u5F0F$\uFF09";
+  textarea.setAttribute("aria-label", "\u7F16\u8F91\u4E2A\u4EBA\u7B14\u8BB0\uFF08Markdown\uFF09");
+  if (options.compact)
+    textarea.rows = 2;
+  const actions = document.createElement("div");
+  actions.className = "pd-note-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "pd-btn is-primary pd-btn-small";
+  save.textContent = "\u4FDD\u5B58";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "pd-btn pd-btn-small";
+  cancel.textContent = "\u53D6\u6D88";
+  const status = document.createElement("span");
+  status.className = "pd-note-status";
+  status.setAttribute("aria-live", "polite");
+  actions.append(save, cancel, status);
+  root.append(head, textarea, actions);
+  const readOnly = plugin.isReadOnly();
+  const updateTime = () => {
+    const state = plugin.getState(card.qid);
+    const hasNotes = card.notes.trim() !== "";
+    const timestamp = state?.notesUpdatedAt ?? (hasNotes ? plugin.getFileMtime(card.file) : null);
+    if (hasNotes && timestamp !== null && timestamp !== void 0) {
+      time.textContent = formatTime(timestamp);
+      time.hidden = false;
+    } else {
+      time.textContent = "";
+      time.hidden = true;
+    }
+  };
+  const isDirty = () => textarea.value !== card.notes;
+  const refreshButtons = () => {
+    save.disabled = readOnly || !isDirty();
+    cancel.disabled = readOnly || !isDirty();
+    textarea.readOnly = readOnly;
+  };
+  textarea.addEventListener("input", () => {
+    refreshButtons();
+    if (!readOnly && isDirty()) {
+      status.textContent = "\u672A\u4FDD\u5B58";
+      status.classList.remove("is-error");
+    } else if (!readOnly) {
+      status.textContent = "";
+    }
+  });
+  cancel.addEventListener("click", () => {
+    textarea.value = card.notes;
+    status.textContent = "";
+    status.classList.remove("is-error");
+    textarea.removeAttribute("aria-invalid");
+    refreshButtons();
+  });
+  let saving = false;
+  const doSave = async () => {
+    if (readOnly || saving)
+      return;
+    if (!isDirty()) {
+      status.textContent = "\u5185\u5BB9\u672A\u53D8\u5316";
+      return;
+    }
+    saving = true;
+    status.textContent = "\u4FDD\u5B58\u4E2D\u2026";
+    status.classList.remove("is-error");
+    save.disabled = true;
+    cancel.disabled = true;
+    const draft = textarea.value;
+    const result = await plugin.saveNotes(card, draft);
+    saving = false;
+    if (result.ok) {
+      card.notes = draft;
+      updateTime();
+      refreshButtons();
+      status.textContent = draft.trim() === "" ? "\u5DF2\u6E05\u9664\u7B14\u8BB0" : `\u5DF2\u4FDD\u5B58 ${(/* @__PURE__ */ new Date()).toTimeString().slice(0, 5)}`;
+      textarea.removeAttribute("aria-invalid");
+    } else {
+      status.textContent = `\u4FDD\u5B58\u5931\u8D25\uFF1A${result.error ?? "\u672A\u77E5\u9519\u8BEF"}`;
+      status.classList.add("is-error");
+      textarea.setAttribute("aria-invalid", "true");
+      refreshButtons();
+    }
+  };
+  save.addEventListener("click", () => {
+    void doSave();
+  });
+  textarea.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      void doSave();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (isDirty() && !readOnly) {
+        textarea.value = card.notes;
+        status.textContent = "\u5DF2\u53D6\u6D88\u4FEE\u6539";
+      }
+      refreshButtons();
+      event.stopPropagation();
+    }
+  });
+  if (readOnly) {
+    status.textContent = "\u53EA\u8BFB\u6A21\u5F0F\uFF0C\u6682\u4E0D\u80FD\u4FDD\u5B58";
+    root.title = "data.json \u5904\u4E8E\u53EA\u8BFB\u6A21\u5F0F";
+  }
+  updateTime();
+  refreshButtons();
+  return root;
+}
+
+// src/view/tagPopover.ts
+var import_obsidian3 = require("obsidian");
+var active = null;
+function closeActive(force = true) {
+  active?.close(force);
+}
+function openTagPopover(anchor, plugin, card) {
+  if (active && active.anchor === anchor) {
+    active.close();
+    return;
+  }
+  if (active)
+    active.close();
+  const taxonomy = plugin.settings.taxonomy;
+  const readOnly = plugin.isReadOnly();
+  const initial = {
+    category: card.category || "\u6570\u5B66",
+    subject: card.subject || "",
+    tags: [...card.tags]
+  };
+  let category = initial.category;
+  let subject = initial.subject;
+  let tags = [...initial.tags];
+  const root = document.createElement("div");
+  root.className = "pd-root pd-popover pd-tag-popover";
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-label", "\u7F16\u8F91\u6807\u7B7E");
+  const head = document.createElement("div");
+  head.className = "pd-popover-head";
+  const title = document.createElement("span");
+  title.className = "pd-popover-title";
+  title.textContent = "\u6807\u7B7E";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "pd-icon-btn";
+  closeBtn.setAttribute("aria-label", "\u5173\u95ED");
+  (0, import_obsidian3.setIcon)(closeBtn, "x");
+  head.append(title, closeBtn);
+  root.appendChild(head);
+  const categoryRow = row(root, "\u5927\u79D1\u76EE");
+  const categorySelect = select(categoryRow);
+  const subjectRow = row(root, "\u5B50\u79D1\u76EE");
+  const subjectSelect = select(subjectRow);
+  const tagsRow = row(root, "\u5DF2\u9009\u6807\u7B7E", true);
+  const selected = document.createElement("div");
+  selected.className = "pd-tag-selected";
+  const input = document.createElement("input");
+  input.className = "pd-pop-input";
+  input.placeholder = "\u8F93\u5165\u6807\u7B7E\uFF0C\u56DE\u8F66\u6DFB\u52A0";
+  input.setAttribute("aria-label", "\u6DFB\u52A0\u6807\u7B7E");
+  const datalistId = `pd-tag-options-${Date.now()}`;
+  const datalist = document.createElement("datalist");
+  datalist.id = datalistId;
+  input.setAttribute("list", datalistId);
+  tagsRow.append(selected, input, datalist);
+  const hint = document.createElement("div");
+  hint.className = "pd-pop-hint";
+  hint.textContent = "\u5927\u79D1\u76EE/\u5B50\u79D1\u76EE\u9700\u5728\u300C\u5206\u7C7B\u8BBE\u7F6E\u300D\u4E2D\u6DFB\u52A0\uFF1B\u6807\u7B7E\u53EF\u81EA\u7531\u65B0\u589E";
+  const error = document.createElement("div");
+  error.className = "pd-pop-error";
+  error.setAttribute("role", "status");
+  error.setAttribute("aria-live", "polite");
+  const actions = document.createElement("div");
+  actions.className = "pd-pop-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "pd-btn pd-btn-small";
+  cancel.textContent = "\u53D6\u6D88";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "pd-btn is-primary pd-btn-small";
+  save.textContent = "\u4FDD\u5B58";
+  actions.append(cancel, save);
+  root.append(hint, error, actions);
+  document.body.appendChild(root);
+  const names = taxonomy.categories.map((item) => item.name);
+  const isConfigured = (name) => names.includes(name);
+  const renderCategoryOptions = () => {
+    categorySelect.empty();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "\u8BF7\u9009\u62E9";
+    categorySelect.appendChild(placeholder);
+    for (const name of names) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      categorySelect.appendChild(option);
+    }
+    if (category && !isConfigured(category)) {
+      const option = document.createElement("option");
+      option.value = category;
+      option.textContent = `\uFF08\u672A\u914D\u7F6E\uFF09${category}`;
+      option.disabled = true;
+      categorySelect.appendChild(option);
+    }
+    categorySelect.value = category;
+    categorySelect.disabled = readOnly;
+  };
+  const renderSubjectOptions = () => {
+    subjectSelect.empty();
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "\uFF08\u7559\u7A7A\uFF09";
+    subjectSelect.appendChild(blank);
+    const options = isConfigured(category) ? taxonomySubjects(taxonomy, category) : [];
+    for (const name of options) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      subjectSelect.appendChild(option);
+    }
+    if (subject && !options.includes(subject)) {
+      const option = document.createElement("option");
+      option.value = subject;
+      option.textContent = `\uFF08\u672A\u914D\u7F6E\uFF09${subject}`;
+      option.disabled = true;
+      subjectSelect.appendChild(option);
+    }
+    subjectSelect.value = subject;
+    subjectSelect.disabled = readOnly || !category;
+    subjectSelect.setAttribute("aria-disabled", String(subjectSelect.disabled));
+    subjectSelect.title = category ? "" : "\u8BF7\u5148\u9009\u62E9\u5927\u79D1\u76EE";
+  };
+  const refreshSuggestions = () => {
+    datalist.empty();
+    const set = /* @__PURE__ */ new Set();
+    for (const item of plugin.getCards()) {
+      if ((item.category || "\u6570\u5B66") !== category)
+        continue;
+      for (const tag of item.tags)
+        if (!tags.includes(tag))
+          set.add(tag);
+    }
+    for (const tag of [...set].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
+      const option = document.createElement("option");
+      option.value = tag;
+      datalist.appendChild(option);
+    }
+  };
+  const renderTags = () => {
+    selected.empty();
+    for (const tag of tags) {
+      const chip = document.createElement("span");
+      chip.className = "pd-tag is-topic pd-tag-selected-chip";
+      const label = document.createElement("span");
+      label.textContent = tag;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "pd-tag-remove";
+      remove.setAttribute("aria-label", `\u79FB\u9664\u6807\u7B7E ${tag}`);
+      remove.textContent = "\xD7";
+      remove.disabled = readOnly;
+      remove.addEventListener("click", () => {
+        tags = tags.filter((item) => item !== tag);
+        renderTags();
+        refreshSuggestions();
+        updateSaveState();
+      });
+      chip.append(label, remove);
+      selected.appendChild(chip);
+    }
+    if (tags.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "pd-pop-empty";
+      empty.textContent = "\u6682\u65E0\u6807\u7B7E";
+      selected.appendChild(empty);
+    }
+  };
+  const addTag = (raw) => {
+    const value = raw.trim();
+    if (value === "" || tags.includes(value))
+      return;
+    tags = [...tags, value];
+    renderTags();
+    refreshSuggestions();
+    updateSaveState();
+  };
+  const isDirty = () => category !== initial.category || subject !== initial.subject || tags.join("\0") !== initial.tags.join("\0");
+  const updateSaveState = () => {
+    save.disabled = readOnly || !category || !isDirty();
+  };
+  categorySelect.addEventListener("change", () => {
+    category = categorySelect.value;
+    subject = "";
+    renderSubjectOptions();
+    renderTags();
+    refreshSuggestions();
+    updateSaveState();
+  });
+  subjectSelect.addEventListener("change", () => {
+    subject = subjectSelect.value;
+    updateSaveState();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addTag(input.value);
+      input.value = "";
+      return;
+    }
+    if (event.key === "Backspace" && input.value === "" && tags.length > 0) {
+      event.preventDefault();
+      tags = tags.slice(0, -1);
+      renderTags();
+      refreshSuggestions();
+      updateSaveState();
+    }
+  });
+  const requestClose = (force = false) => {
+    if (!force && isDirty()) {
+      const confirmed = window.confirm("\u653E\u5F03\u672A\u4FDD\u5B58\u7684\u6807\u7B7E\u4FEE\u6539\uFF1F");
+      if (!confirmed)
+        return;
+    }
+    document.removeEventListener("mousedown", onOutside, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("scroll", reposition, true);
+    window.removeEventListener("resize", reposition);
+    root.remove();
+    anchor.setAttribute("aria-expanded", "false");
+    if (active && active.el === root)
+      active = null;
+    if (anchor.isConnected)
+      anchor.focus();
+  };
+  const doSave = async () => {
+    if (readOnly) {
+      error.textContent = "\u53EA\u8BFB\u6A21\u5F0F\uFF0C\u6682\u4E0D\u80FD\u4FDD\u5B58";
+      return;
+    }
+    if (!category) {
+      error.textContent = "\u8BF7\u5148\u9009\u62E9\u5927\u79D1\u76EE\uFF08\u9700\u5728\u5206\u7C7B\u8BBE\u7F6E\u4E2D\u6DFB\u52A0\uFF09";
+      return;
+    }
+    save.disabled = true;
+    cancel.disabled = true;
+    error.textContent = "\u4FDD\u5B58\u4E2D\u2026";
+    const result = await plugin.saveMetadata(card, { category, subject, tags });
+    if (!result.ok) {
+      error.textContent = `\u4FDD\u5B58\u5931\u8D25\uFF1A${result.error ?? "\u672A\u77E5\u9519\u8BEF"}`;
+      save.disabled = false;
+      cancel.disabled = false;
+      return;
+    }
+    if (!result.changed) {
+    }
+    requestClose(true);
+  };
+  save.addEventListener("click", () => {
+    void doSave();
+  });
+  cancel.addEventListener("click", () => requestClose());
+  closeBtn.addEventListener("click", () => requestClose());
+  const onOutside = (event) => {
+    if (!root.contains(event.target) && !anchor.contains(event.target)) {
+      requestClose();
+    }
+  };
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      requestClose();
+    } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      void doSave();
+    }
+  };
+  const reposition = () => {
+    if (!anchor.isConnected) {
+      requestClose(true);
+      return;
+    }
+    if (window.innerWidth < 480) {
+      root.style.left = "";
+      root.style.top = "";
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const width = root.offsetWidth || 320;
+    const height = root.offsetHeight || 0;
+    let left = rect.right - width;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    let top = rect.bottom + 6;
+    if (top + height > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - height - 6);
+    }
+    root.style.left = `${Math.round(left)}px`;
+    root.style.top = `${Math.round(top)}px`;
+  };
+  renderCategoryOptions();
+  renderSubjectOptions();
+  renderTags();
+  refreshSuggestions();
+  updateSaveState();
+  anchor.setAttribute("aria-expanded", "true");
+  document.addEventListener("mousedown", onOutside, true);
+  document.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("scroll", reposition, true);
+  window.addEventListener("resize", reposition);
+  root.classList.add("is-open");
+  reposition();
+  active = { el: root, anchor, close: (force) => requestClose(force) };
+  window.setTimeout(() => categorySelect.focus(), 0);
+}
+function row(parent, labelText, tall = false) {
+  const rowEl = document.createElement("div");
+  rowEl.className = "pd-pop-row" + (tall ? " is-tall" : "");
+  const label = document.createElement("span");
+  label.className = "pd-pop-label";
+  label.textContent = labelText;
+  rowEl.appendChild(label);
+  parent.appendChild(rowEl);
+  return rowEl;
+}
+function select(parent) {
+  const el = document.createElement("select");
+  el.className = "pd-pop-select";
+  parent.appendChild(el);
+  return el;
+}
+function closeTagPopover() {
+  closeActive(true);
+}
+
+// src/view/starSound.ts
+var ctx = null;
+function getCtx() {
+  try {
+    const ctor = window.AudioContext ?? window.webkitAudioContext;
+    if (!ctor)
+      return null;
+    if (!ctx)
+      ctx = new ctor();
+    if (ctx.state === "suspended")
+      void ctx.resume().catch(() => void 0);
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+function playStarClick() {
+  try {
+    const ac = getCtx();
+    if (!ac)
+      return;
+    const t = ac.currentTime;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(880, t);
+    osc.frequency.exponentialRampToValueAtTime(660, t + 0.05);
+    gain.gain.setValueAtTime(1e-4, t);
+    gain.gain.exponentialRampToValueAtTime(0.08, t + 4e-3);
+    gain.gain.exponentialRampToValueAtTime(1e-4, t + 0.06);
+    osc.connect(gain).connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + 0.07);
+  } catch {
+  }
+}
+function closeStarSound() {
+  try {
+    if (ctx) {
+      void ctx.close().catch(() => void 0);
+      ctx = null;
+    }
+  } catch {
+  }
+}
+
 // src/view/card.ts
 function renderMarkdown(plugin, text, el, sourcePath, owner) {
-  void import_obsidian3.MarkdownRenderer.render(plugin.app, text, el, sourcePath, owner);
+  void import_obsidian4.MarkdownRenderer.render(plugin.app, text, el, sourcePath, owner);
 }
 function lineCount(text) {
   return text.split(/\r?\n/).filter((line) => line.trim() !== "").length;
@@ -1276,11 +2209,15 @@ function lineCount(text) {
 function buildTags(card) {
   const tags = document.createElement("div");
   tags.className = "pd-tags";
+  const category = document.createElement("span");
+  category.className = "pd-tag is-category";
+  category.textContent = card.category || "\u6570\u5B66";
+  tags.appendChild(category);
   const subject = document.createElement("span");
   subject.className = "pd-tag is-subject";
   subject.textContent = card.subject || "\u672A\u5206\u7C7B";
   tags.appendChild(subject);
-  const topics = card.tags.slice(0, 3);
+  const topics = card.tags.slice(0, 2);
   for (const tag of topics) {
     const chip = document.createElement("span");
     chip.className = "pd-tag is-topic";
@@ -1295,14 +2232,48 @@ function buildTags(card) {
   }
   return tags;
 }
-function buildCardMenuButton(plugin, card) {
+function buildStarButton(plugin, card) {
+  const starred = plugin.getState(card.qid)?.star ?? card.starInitial;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "pd-icon-btn pd-star" + (starred ? " is-active" : "");
+  button.setAttribute("aria-label", starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF");
+  button.setAttribute("aria-pressed", String(starred));
+  (0, import_obsidian4.setIcon)(button, "star");
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const now = plugin.toggleStar(card.qid);
+    button.classList.toggle("is-active", now);
+    button.setAttribute("aria-pressed", String(now));
+    button.setAttribute("aria-label", now ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF");
+    plugin.requestSave();
+    if (now)
+      playStarClick();
+  });
+  return button;
+}
+function buildTagButton(plugin, card) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "pd-icon-btn pd-tag-btn";
+  button.setAttribute("aria-label", "\u7F16\u8F91\u6807\u7B7E");
+  button.setAttribute("aria-haspopup", "dialog");
+  button.setAttribute("aria-expanded", "false");
+  (0, import_obsidian4.setIcon)(button, "tags");
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openTagPopover(button, plugin, card);
+  });
+  return button;
+}
+function buildMenuButton(plugin, card) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "pd-icon-btn pd-card-more";
   button.dataset.tool = "more";
   button.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
   button.setAttribute("aria-haspopup", "menu");
-  (0, import_obsidian3.setIcon)(button, "more-horizontal");
+  (0, import_obsidian4.setIcon)(button, "more-horizontal");
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     const starred = plugin.getState(card.qid)?.star ?? card.starInitial;
@@ -1372,7 +2343,11 @@ function renderQuestionCard(options) {
   head.appendChild(buildTags(card));
   const tools = document.createElement("div");
   tools.className = "pd-card-tools";
-  tools.appendChild(buildCardMenuButton(plugin, card));
+  tools.append(
+    buildTagButton(plugin, card),
+    buildStarButton(plugin, card),
+    buildMenuButton(plugin, card)
+  );
   head.appendChild(tools);
   root.appendChild(head);
   const stem = document.createElement("div");
@@ -1390,29 +2365,32 @@ function renderQuestionCard(options) {
     }
     root.appendChild(errors);
   }
+  const state = plugin.getState(card.qid);
+  const answerLines = lineCount(card.answer);
+  const noteLines = lineCount(card.notes);
+  const meta = noteLines > 0 ? `\u7B54\u6848 ${answerLines} \u884C \xB7 \u7B14\u8BB0 ${noteLines} \u884C` : `\u7B54\u6848 ${answerLines} \u884C`;
   const folds = document.createElement("div");
   folds.className = "pd-folds";
   root.appendChild(folds);
-  const answerLines = lineCount(card.answer);
-  createCollapsible(folds, "\u7B54\u6848", {
-    count: answerLines > 0 ? `${answerLines} \u884C` : void 0,
+  const merged = createCollapsible(folds, "\u7B54\u6848\u4E0E\u7B14\u8BB0", {
+    count: meta,
+    startsOpen: state?.foldOpen ?? false,
+    onToggle: (open) => plugin.setFoldOpen(card.qid, open),
     onFirstOpen: (content) => {
+      content.dataset.fold = "answer-notes";
+      const answer = document.createElement("div");
+      answer.className = "pd-answer-render pd-body";
       if (card.answer.trim() === "") {
-        const missing = document.createElement("div");
-        missing.className = "pd-card-error";
-        missing.textContent = "\u7F3A\u5C11\u7B54\u6848\u5206\u8282";
-        content.appendChild(missing);
-        return;
+        answer.classList.add("pd-card-error");
+        answer.textContent = "\u7F3A\u5C11\u7B54\u6848\u5206\u8282";
+      } else {
+        renderMarkdown(plugin, card.answer, answer, card.file, owner);
       }
-      renderMarkdown(plugin, card.answer, content, card.file, owner);
+      content.appendChild(answer);
+      content.appendChild(createNoteEditor(plugin, card, content));
     }
   });
-  if (card.notes.trim() !== "") {
-    createCollapsible(folds, "\u4E2A\u4EBA\u7B14\u8BB0", {
-      count: `${lineCount(card.notes)} \u884C`,
-      onFirstOpen: (content) => renderMarkdown(plugin, card.notes, content, card.file, owner)
-    });
-  }
+  merged.root.dataset.fold = "answer-notes";
   if (card.aiNotes.trim() !== "") {
     createCollapsible(folds, "AI \u7B14\u8BB0", {
       count: `${lineCount(card.aiNotes)} \u884C`,
@@ -1455,8 +2433,8 @@ function renderQuestionCard(options) {
 }
 
 // src/view/renderOwner.ts
-var import_obsidian4 = require("obsidian");
-var RenderScope = class extends import_obsidian4.MarkdownRenderChild {
+var import_obsidian5 = require("obsidian");
+var RenderScope = class extends import_obsidian5.MarkdownRenderChild {
   constructor(containerEl) {
     super(containerEl);
   }
@@ -1466,8 +2444,300 @@ function createRenderScope(parent, containerEl) {
 }
 
 // src/view/settingsTab.ts
-var import_obsidian5 = require("obsidian");
-var ZaptraceSettingsTab = class extends import_obsidian5.PluginSettingTab {
+var import_obsidian7 = require("obsidian");
+
+// src/view/taxonomyPanel.ts
+var import_obsidian6 = require("obsidian");
+function openTaxonomyModal(plugin) {
+  new TaxonomyModal(plugin.app, plugin).open();
+}
+var TaxonomyModal = class extends import_obsidian6.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.draft = [];
+    this.saved = false;
+    this.readOnly = false;
+    this.renderSuggestions = () => void 0;
+    this.plugin = plugin;
+  }
+  onOpen() {
+    this.modalEl.addClass("pd-root", "pd-modal-host");
+    this.contentEl.addClass("pd-modal");
+    this.contentEl.empty();
+    this.readOnly = this.plugin.isReadOnly();
+    this.draft = JSON.parse(JSON.stringify(this.plugin.settings.taxonomy.categories));
+    const title = document.createElement("h2");
+    title.className = "pd-modal-title";
+    title.textContent = "\u5206\u7C7B\u8BBE\u7F6E";
+    const sub = document.createElement("p");
+    sub.className = "pd-modal-sub";
+    sub.textContent = "\u7BA1\u7406\u5927\u79D1\u76EE\u4E0E\u5B50\u79D1\u76EE\uFF1B\u53EA\u5F71\u54CD\u9009\u62E9\u5668\uFF0C\u4E0D\u6539\u5199\u5DF2\u6709\u9898\u5361\u3002";
+    this.contentEl.append(title, sub);
+    this.container = document.createElement("div");
+    this.container.className = "pd-taxonomy-list";
+    this.contentEl.appendChild(this.container);
+    const addCategoryRow = document.createElement("div");
+    addCategoryRow.className = "pd-taxonomy-add";
+    const categoryInput = document.createElement("input");
+    categoryInput.className = "pd-modal-input";
+    categoryInput.placeholder = "\u65B0\u589E\u5927\u79D1\u76EE";
+    categoryInput.setAttribute("aria-label", "\u65B0\u589E\u5927\u79D1\u76EE");
+    const addCategory = document.createElement("button");
+    addCategory.type = "button";
+    addCategory.className = "pd-btn";
+    addCategory.textContent = "\u6DFB\u52A0";
+    addCategory.addEventListener("click", () => {
+      this.addCategory(categoryInput.value);
+      categoryInput.value = "";
+    });
+    categoryInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.addCategory(categoryInput.value);
+        categoryInput.value = "";
+      }
+    });
+    addCategoryRow.append(categoryInput, addCategory);
+    this.contentEl.appendChild(addCategoryRow);
+    const suggestions = document.createElement("div");
+    suggestions.className = "pd-taxonomy-suggestions";
+    this.contentEl.appendChild(suggestions);
+    this.renderSuggestions = () => {
+      suggestions.empty();
+      const configuredCats = new Set(this.draft.map((item) => item.name));
+      const unconfiguredCats = /* @__PURE__ */ new Set();
+      const unconfiguredSubjects = /* @__PURE__ */ new Map();
+      for (const card of this.plugin.getCards()) {
+        const cat = card.category || "\u6570\u5B66";
+        if (!configuredCats.has(cat))
+          unconfiguredCats.add(cat);
+        const target = this.draft.find((item) => item.name === cat);
+        if (target && card.subject && !target.subjects.includes(card.subject)) {
+          const set = unconfiguredSubjects.get(cat) ?? /* @__PURE__ */ new Set();
+          set.add(card.subject);
+          unconfiguredSubjects.set(cat, set);
+        }
+      }
+      if (unconfiguredCats.size === 0 && unconfiguredSubjects.size === 0)
+        return;
+      const label = document.createElement("div");
+      label.className = "pd-form-hint";
+      label.textContent = "\u9898\u5361\u4E2D\u51FA\u73B0\u4F46\u672A\u914D\u7F6E\uFF1A";
+      suggestions.appendChild(label);
+      for (const cat of unconfiguredCats) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "pd-chip";
+        button.textContent = cat;
+        button.addEventListener("click", () => {
+          this.addCategory(cat);
+          this.renderAll();
+        });
+        suggestions.appendChild(button);
+      }
+      for (const [cat, subjects] of unconfiguredSubjects) {
+        for (const subject of subjects) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "pd-chip";
+          button.textContent = `${cat} \xB7 ${subject}`;
+          button.addEventListener("click", () => {
+            const target = this.draft.find((item) => item.name === cat);
+            if (target && !target.subjects.includes(subject))
+              target.subjects.push(subject);
+            this.renderAll();
+          });
+          suggestions.appendChild(button);
+        }
+      }
+    };
+    this.errorEl = document.createElement("div");
+    this.errorEl.className = "pd-modal-error";
+    this.errorEl.setAttribute("role", "status");
+    this.errorEl.setAttribute("aria-live", "polite");
+    this.contentEl.appendChild(this.errorEl);
+    const actions = document.createElement("div");
+    actions.className = "pd-modal-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "pd-btn";
+    cancel.textContent = "\u53D6\u6D88";
+    cancel.addEventListener("click", () => this.close());
+    this.saveBtn = document.createElement("button");
+    this.saveBtn.type = "button";
+    this.saveBtn.className = "pd-btn is-primary";
+    this.saveBtn.textContent = "\u4FDD\u5B58";
+    this.saveBtn.addEventListener("click", () => void this.doSave());
+    actions.append(cancel, this.saveBtn);
+    this.contentEl.appendChild(actions);
+    if (this.readOnly) {
+      this.saveBtn.disabled = true;
+      this.errorEl.textContent = "\u53EA\u8BFB\u6A21\u5F0F\uFF0C\u6682\u4E0D\u80FD\u4FDD\u5B58";
+    }
+    this.renderAll();
+  }
+  renderList() {
+    if (!this.container)
+      return;
+    this.container.empty();
+    if (this.draft.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pd-empty pd-empty-small";
+      empty.textContent = "\u8FD8\u6CA1\u6709\u5927\u79D1\u76EE\u3002\u6DFB\u52A0\u4E00\u4E2A\uFF0C\u6216\u4ECE\u4E0B\u65B9\u300C\u672A\u914D\u7F6E\u300D\u52A0\u5165\u3002";
+      this.container.appendChild(empty);
+    }
+    for (const category of this.draft) {
+      const block = document.createElement("div");
+      block.className = "pd-taxonomy-cat";
+      const head = document.createElement("div");
+      head.className = "pd-taxonomy-cat-head";
+      const name = document.createElement("span");
+      name.className = "pd-taxonomy-name";
+      name.textContent = category.name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "pd-btn pd-btn-small";
+      remove.textContent = "\u5220\u9664";
+      remove.addEventListener("click", () => {
+        const used = this.plugin.getCards().some((card) => (card.category || "\u6570\u5B66") === category.name);
+        if (used && !window.confirm(`\u300C${category.name}\u300D\u4ECD\u6709\u5361\u7247\u5728\u4F7F\u7528\uFF1B\u5220\u9664\u53EA\u5F71\u54CD\u9009\u62E9\u5668\uFF0C\u4E0D\u6539\u9898\u5361\u3002\u7EE7\u7EED\uFF1F`)) {
+          return;
+        }
+        this.draft = this.draft.filter((item) => item.name !== category.name);
+        this.renderAll();
+      });
+      head.append(name, remove);
+      const subjectRow = document.createElement("div");
+      subjectRow.className = "pd-taxonomy-subjects";
+      const label = document.createElement("span");
+      label.className = "pd-form-hint";
+      label.textContent = "\u5B50\u79D1\u76EE\uFF1A";
+      subjectRow.appendChild(label);
+      for (const subject of category.subjects) {
+        const chip = document.createElement("span");
+        chip.className = "pd-tag is-topic pd-tag-selected-chip";
+        const text = document.createElement("span");
+        text.textContent = subject;
+        const removeSubject = document.createElement("button");
+        removeSubject.type = "button";
+        removeSubject.className = "pd-tag-remove";
+        removeSubject.setAttribute("aria-label", `\u79FB\u9664\u5B50\u79D1\u76EE ${subject}`);
+        removeSubject.textContent = "\xD7";
+        removeSubject.addEventListener("click", () => {
+          category.subjects = category.subjects.filter((item) => item !== subject);
+          this.renderAll();
+        });
+        chip.append(text, removeSubject);
+        subjectRow.appendChild(chip);
+      }
+      const input = document.createElement("input");
+      input.className = "pd-modal-input pd-taxonomy-subject-input";
+      input.placeholder = "\u6DFB\u52A0\u5B50\u79D1\u76EE";
+      input.setAttribute("aria-label", `\u4E3A ${category.name} \u6DFB\u52A0\u5B50\u79D1\u76EE`);
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "pd-btn pd-btn-small";
+      add.textContent = "\u6DFB\u52A0";
+      const addSubject = () => {
+        const value = input.value.trim();
+        if (value === "")
+          return;
+        if (category.subjects.includes(value)) {
+          this.setError("\u8BE5\u5B50\u79D1\u76EE\u5DF2\u5B58\u5728");
+          return;
+        }
+        category.subjects.push(value);
+        input.value = "";
+        this.setError("");
+        this.renderAll();
+      };
+      add.addEventListener("click", addSubject);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          addSubject();
+        }
+      });
+      subjectRow.append(input, add);
+      block.append(head, subjectRow);
+      this.container.appendChild(block);
+    }
+  }
+  renderAll() {
+    this.renderList();
+    this.renderSuggestions();
+    this.validate();
+  }
+  addCategory(raw) {
+    const name = raw.trim();
+    if (name === "") {
+      this.setError("\u5927\u79D1\u76EE\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
+      return;
+    }
+    if (this.draft.some((item) => item.name === name)) {
+      this.setError("\u8BE5\u5927\u79D1\u76EE\u5DF2\u5B58\u5728");
+      return;
+    }
+    this.draft.push({ name, subjects: [] });
+    this.setError("");
+    this.renderAll();
+  }
+  validate() {
+    const names = /* @__PURE__ */ new Set();
+    for (const category of this.draft) {
+      if (category.name.trim() === "") {
+        this.setError("\u5B58\u5728\u7A7A\u7684\u5927\u79D1\u76EE\u540D\u79F0");
+        return;
+      }
+      if (names.has(category.name)) {
+        this.setError("\u5B58\u5728\u91CD\u590D\u7684\u5927\u79D1\u76EE\u540D\u79F0");
+        return;
+      }
+      names.add(category.name);
+    }
+    this.setError("");
+  }
+  setError(message) {
+    if (this.errorEl)
+      this.errorEl.textContent = message;
+  }
+  async doSave() {
+    if (this.readOnly)
+      return;
+    this.validate();
+    if (this.errorEl.textContent !== "")
+      return;
+    this.saveBtn.disabled = true;
+    const taxonomy = {
+      categories: this.draft.map((category) => ({
+        ...category,
+        name: category.name,
+        subjects: [...category.subjects]
+      })),
+      seeded: true
+    };
+    try {
+      await this.plugin.saveSettings({ ...this.plugin.settings, taxonomy });
+      this.saved = true;
+      this.plugin.refreshAll();
+      this.close();
+    } catch (error) {
+      this.saveBtn.disabled = false;
+      this.setError(`\u4FDD\u5B58\u5931\u8D25\uFF1A${String(error)}`);
+    }
+  }
+  close() {
+    if (!this.saved && JSON.stringify(this.draft) !== JSON.stringify(this.plugin.settings.taxonomy.categories)) {
+      const confirmed = window.confirm("\u653E\u5F03\u672A\u4FDD\u5B58\u7684\u5206\u7C7B\u4FEE\u6539\uFF1F");
+      if (!confirmed)
+        return;
+    }
+    super.close();
+  }
+};
+
+// src/view/settingsTab.ts
+var ZaptraceSettingsTab = class extends import_obsidian7.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1482,17 +2752,20 @@ var ZaptraceSettingsTab = class extends import_obsidian5.PluginSettingTab {
         "\u5F53\u524D\u4E3A\u53EA\u8BFB\u6A21\u5F0F\uFF08data.json \u7248\u672C\u9AD8\u4E8E\u63D2\u4EF6\u6216\u7ED3\u6784\u635F\u574F\uFF09\uFF0C\u8BBE\u7F6E\u4E0E\u8BC4\u5206\u4E0D\u4F1A\u4FDD\u5B58\u3002\u8BF7\u5148\u5907\u4EFD\u5E76\u4FEE\u590D data.json\u3002"
       );
     }
-    new import_obsidian5.Setting(containerEl).setName("\u9898\u5361\u76EE\u5F55").setDesc("\u9650\u5B9A\u626B\u63CF\u8303\u56F4\uFF1B\u7559\u7A7A\u8868\u793A\u626B\u63CF\u5168\u5E93\u3002").addText(
+    new import_obsidian7.Setting(containerEl).setName("\u5206\u7C7B\u8BBE\u7F6E").setDesc("\u7BA1\u7406\u5927\u79D1\u76EE\u4E0E\u5B50\u79D1\u76EE\uFF1B\u53EA\u5F71\u54CD\u6807\u7B7E\u7F16\u8F91\u5668\u91CC\u7684\u53EF\u9009\u9879\uFF0C\u4E0D\u6539\u5199\u5DF2\u6709\u9898\u5361\u3002").addButton(
+      (button) => button.setButtonText("\u7F16\u8F91\u5206\u7C7B").onClick(() => openTaxonomyModal(this.plugin))
+    );
+    new import_obsidian7.Setting(containerEl).setName("\u9898\u5361\u76EE\u5F55").setDesc("\u9650\u5B9A\u626B\u63CF\u8303\u56F4\uFF1B\u7559\u7A7A\u8868\u793A\u626B\u63CF\u5168\u5E93\u3002").addText(
       (text) => text.setPlaceholder("\u4F8B\u5982 \u6570\u5B66/\u9898\u5E93").setValue(this.plugin.settings.cardFolder).onChange(async (value) => {
         await this.plugin.updateSettings({ cardFolder: value.trim() });
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("\u9ED8\u8BA4\u79D1\u76EE").setDesc("\u9898\u5361\u6CA1\u6709 subject \u65F6\u4F7F\u7528\uFF1B\u7559\u7A7A\u5219\u53D6\u6240\u5728\u6587\u4EF6\u5939\u540D\u3002").addText(
+    new import_obsidian7.Setting(containerEl).setName("\u9ED8\u8BA4\u79D1\u76EE").setDesc("\u9898\u5361\u6CA1\u6709 subject \u65F6\u4F7F\u7528\uFF1B\u7559\u7A7A\u5219\u53D6\u6240\u5728\u6587\u4EF6\u5939\u540D\u3002").addText(
       (text) => text.setValue(this.plugin.settings.defaultSubject).onChange(async (value) => {
         await this.plugin.updateSettings({ defaultSubject: value.trim() });
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("\u6BCF\u65E5\u590D\u4E60\u4E0A\u9650").setDesc("\u4ECA\u65E5\u961F\u5217/\u7EC4\u5377\u7684\u6700\u5927\u9898\u6570\uFF08\u9ED8\u8BA4 20\uFF0C\u4E0D\u590D\u7528\u5B66\u4E60\u7CFB\u7EDF\u7684 8 \u6761\u4E0A\u9650\uFF09\u3002").addText(
+    new import_obsidian7.Setting(containerEl).setName("\u6BCF\u65E5\u590D\u4E60\u4E0A\u9650").setDesc("\u4ECA\u65E5\u961F\u5217/\u7EC4\u5377\u7684\u6700\u5927\u9898\u6570\uFF08\u9ED8\u8BA4 20\uFF0C\u4E0D\u590D\u7528\u5B66\u4E60\u7CFB\u7EDF\u7684 8 \u6761\u4E0A\u9650\uFF09\u3002").addText(
       (text) => text.setValue(String(this.plugin.settings.dailyReviewLimit)).onChange(async (value) => {
         const parsed = Number.parseInt(value, 10);
         if (!Number.isFinite(parsed))
@@ -1502,31 +2775,31 @@ var ZaptraceSettingsTab = class extends import_obsidian5.PluginSettingTab {
         });
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("\u65E5\u671F\u6A21\u5F0F").setDesc("\u672C\u5730\uFF1A\u8BBE\u5907\u65F6\u533A\uFF1B\u56FA\u5B9A\uFF1AAsia/Shanghai\u3002").addDropdown(
+    new import_obsidian7.Setting(containerEl).setName("\u65E5\u671F\u6A21\u5F0F").setDesc("\u672C\u5730\uFF1A\u8BBE\u5907\u65F6\u533A\uFF1B\u56FA\u5B9A\uFF1AAsia/Shanghai\u3002").addDropdown(
       (dropdown) => dropdown.addOptions({ local: "\u672C\u5730\u65F6\u533A", fixed: "\u56FA\u5B9A Asia/Shanghai" }).setValue(this.plugin.settings.dateMode).onChange(async (value) => {
         await this.plugin.updateSettings({ dateMode: value === "fixed" ? "fixed" : "local" });
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("\u5FC5\u987B\u4F5C\u7B54\u540E\u624D\u80FD\u770B\u7B54\u6848").setDesc("\u5F00\u542F\u540E\uFF0C\u7EC3\u4E60\u65F6\u9700\u70B9\u300C\u6211\u5199\u5B8C\u4E86\u300D\u624D\u63ED\u6653\u7B54\u6848\u3002").addToggle(
+    new import_obsidian7.Setting(containerEl).setName("\u5FC5\u987B\u4F5C\u7B54\u540E\u624D\u80FD\u770B\u7B54\u6848").setDesc("\u5F00\u542F\u540E\uFF0C\u7EC3\u4E60\u65F6\u9700\u70B9\u300C\u6211\u5199\u5B8C\u4E86\u300D\u624D\u63ED\u6653\u7B54\u6848\u3002").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.requireAnswerBeforeReveal).onChange(async (value) => {
         await this.plugin.updateSettings({ requireAnswerBeforeReveal: value });
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("\u5B9E\u65F6\u9884\u89C8").setDesc("compact\uFF1A\u663E\u793A\u53EA\u8BFB\u7F29\u7565\u5361\uFF1Bsource\uFF1A\u4FDD\u7559\u6E90\u7801\u5757\u3002").addDropdown(
+    new import_obsidian7.Setting(containerEl).setName("\u5B9E\u65F6\u9884\u89C8").setDesc("compact\uFF1A\u663E\u793A\u53EA\u8BFB\u7F29\u7565\u5361\uFF1Bsource\uFF1A\u4FDD\u7559\u6E90\u7801\u5757\u3002").addDropdown(
       (dropdown) => dropdown.addOptions({ compact: "\u53EA\u8BFB\u7F29\u7565\u5361", source: "\u663E\u793A\u6E90\u7801" }).setValue(this.plugin.settings.livePreview).onChange(async (value) => {
         await this.plugin.updateSettings({
           livePreview: value === "source" ? "source" : "compact"
         });
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("\u5916\u89C2\u4E3B\u9898").setDesc("auto \u8DDF\u968F Obsidian\uFF1Bmubu-dark \u4F7F\u7528\u5E55\u5E03\u6697\u8272\u4EE4\u724C\u3002").addDropdown(
+    new import_obsidian7.Setting(containerEl).setName("\u5916\u89C2\u4E3B\u9898").setDesc("auto \u8DDF\u968F Obsidian\uFF1Bmubu-dark \u4F7F\u7528\u5E55\u5E03\u6697\u8272\u4EE4\u724C\u3002").addDropdown(
       (dropdown) => dropdown.addOptions({ auto: "\u8DDF\u968F Obsidian", "mubu-dark": "\u5E55\u5E03\u6697\u8272" }).setValue(this.plugin.settings.theme).onChange(async (value) => {
         await this.plugin.updateSettings({
           theme: value === "mubu-dark" ? "mubu-dark" : "auto"
         });
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("\u91CD\u5EFA\u7D22\u5F15").setDesc("\u91CD\u65B0\u626B\u63CF\u5168\u5E93\u7684 ```zaptrace \u9898\u5361\u3002").addButton(
+    new import_obsidian7.Setting(containerEl).setName("\u91CD\u5EFA\u7D22\u5F15").setDesc("\u91CD\u65B0\u626B\u63CF\u5168\u5E93\u7684 ```zaptrace \u9898\u5361\u3002").addButton(
       (button) => button.setButtonText("\u7ACB\u5373\u91CD\u5EFA").onClick(async () => {
         await this.plugin.rebuildIndex();
       })
@@ -1535,10 +2808,10 @@ var ZaptraceSettingsTab = class extends import_obsidian5.PluginSettingTab {
 };
 
 // src/view/workbenchView.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/view/practicePanel.ts
-var import_obsidian6 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/core/practice.ts
 var PracticeSession = class {
@@ -1590,13 +2863,13 @@ var PracticeSession = class {
    * 评分。**只有 revealed 状态才允许**；viewing / rated 状态返回 null，
    * 且不会调用 recordReview，因此 data.json 不会被写（H4 硬约束）。
    */
-  rate(data, rating, ctx) {
+  rate(data, rating, ctx2) {
     const card = this.current;
     if (!card)
       return null;
     if (this.phase !== "revealed")
       return null;
-    const result = recordReview(data, card, rating, ctx);
+    const result = recordReview(data, card, rating, ctx2);
     this.counts[rating] += 1;
     this.phase = "rated";
     return result;
@@ -1727,8 +3000,8 @@ var PracticePanel = class {
       return true;
     }
     if (event.key === "Enter" && session.canReveal) {
-      const active = document.activeElement;
-      if (active instanceof HTMLButtonElement)
+      const active2 = document.activeElement;
+      if (active2 instanceof HTMLButtonElement)
         return false;
       event.preventDefault();
       this.reveal();
@@ -1776,7 +3049,7 @@ var PracticePanel = class {
     wrap.appendChild(progress);
     const stem = document.createElement("div");
     stem.className = "pd-practice-stem pd-body";
-    void import_obsidian6.MarkdownRenderer.render(this.plugin.app, card.stem, stem, card.file, scope);
+    void import_obsidian8.MarkdownRenderer.render(this.plugin.app, card.stem, stem, card.file, scope);
     wrap.appendChild(stem);
     if (session.canReveal) {
       const actions = document.createElement("div");
@@ -1808,13 +3081,13 @@ var PracticePanel = class {
         body.textContent = "\u7F3A\u5C11\u7B54\u6848\u5206\u8282";
         body.classList.add("pd-card-error");
       } else {
-        void import_obsidian6.MarkdownRenderer.render(this.plugin.app, card.answer, body, card.file, scope);
+        void import_obsidian8.MarkdownRenderer.render(this.plugin.app, card.answer, body, card.file, scope);
       }
       answerBox.append(label, body);
       wrap.appendChild(answerBox);
       if (card.notes.trim() !== "") {
         createCollapsible(wrap, "\u4E2A\u4EBA\u7B14\u8BB0", {
-          onFirstOpen: (content) => void import_obsidian6.MarkdownRenderer.render(
+          onFirstOpen: (content) => void import_obsidian8.MarkdownRenderer.render(
             this.plugin.app,
             card.notes,
             content,
@@ -1825,7 +3098,7 @@ var PracticePanel = class {
       }
       if (card.aiNotes.trim() !== "") {
         createCollapsible(wrap, "AI \u7B14\u8BB0", {
-          onFirstOpen: (content) => void import_obsidian6.MarkdownRenderer.render(
+          onFirstOpen: (content) => void import_obsidian8.MarkdownRenderer.render(
             this.plugin.app,
             card.aiNotes,
             content,
@@ -1927,13 +3200,13 @@ var PracticePanel = class {
     this.status = `\u5DF2\u5B89\u6392\uFF1A${result.due} \u590D\u4E60`;
     this.render();
     window.setTimeout(() => {
-      const active = this.session;
-      if (!active || active.phase !== "rated")
+      const active2 = this.session;
+      if (!active2 || active2.phase !== "rated")
         return;
-      active.advance();
+      active2.advance();
       this.status = null;
-      if (!active.finished)
-        active.markShown(Date.now());
+      if (!active2.finished)
+        active2.markShown(Date.now());
       this.render();
       this.plugin.refreshAll();
     }, 320);
@@ -1941,7 +3214,7 @@ var PracticePanel = class {
 };
 
 // src/view/libraryPanel.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/core/filter.ts
 function matchesFilter(card, state, filter, today) {
@@ -2191,9 +3464,9 @@ var ReviewPanel = class {
         if (!expanded && !filled) {
           filled = true;
           for (const card of list) {
-            const row = document.createElement("button");
-            row.type = "button";
-            row.className = "pd-review-row";
+            const row2 = document.createElement("button");
+            row2.type = "button";
+            row2.className = "pd-review-row";
             const title = document.createElement("span");
             title.className = "pd-review-title";
             title.textContent = firstLine(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
@@ -2201,11 +3474,11 @@ var ReviewPanel = class {
             const due = document.createElement("span");
             due.className = "pd-review-due";
             due.textContent = state?.due ?? "";
-            row.append(title, due);
-            row.addEventListener("click", () => {
+            row2.append(title, due);
+            row2.addEventListener("click", () => {
               void this.plugin.startPractice([card]);
             });
-            body.appendChild(row);
+            body.appendChild(row2);
           }
         }
       });
@@ -2259,9 +3532,9 @@ var ReviewPanel = class {
     host.appendChild(wrap);
   }
   buildLogRow(entry) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "pd-log-row";
+    const row2 = document.createElement("button");
+    row2.type = "button";
+    row2.className = "pd-log-row";
     const time = document.createElement("span");
     time.className = "pd-log-time";
     time.textContent = entry.at.slice(11, 16);
@@ -2271,13 +3544,13 @@ var ReviewPanel = class {
     const subject = document.createElement("span");
     subject.className = "pd-log-subject";
     subject.textContent = entry.subject;
-    row.append(time, rating, subject);
-    row.addEventListener("click", () => {
+    row2.append(time, rating, subject);
+    row2.addEventListener("click", () => {
       const card = this.plugin.getCardByQid(entry.qid);
       if (card)
         void this.plugin.startPractice([card]);
     });
-    return row;
+    return row2;
   }
   practiceRandom() {
     const cards = this.plugin.getCards();
@@ -2407,8 +3680,10 @@ var LibraryPage = class {
     this.filter = emptyFilter();
     this.sort = "due";
     this.statusFilter = "all";
+    this.categoryFilter = null;
     this.viewMode = "cards";
     this.searchInput = null;
+    this.categorySelect = null;
     this.subjectSelect = null;
     this.sortSelect = null;
     this.countEl = null;
@@ -2453,6 +3728,12 @@ var LibraryPage = class {
     const actions = document.createElement("div");
     actions.className = "pd-header-actions";
     createButton(actions, {
+      label: "\u5206\u7C7B\u8BBE\u7F6E",
+      icon: "tags",
+      cls: "pd-btn pd-btn-small pd-taxonomy-btn",
+      onClick: () => openTaxonomyModal(this.plugin)
+    });
+    createButton(actions, {
       label: "",
       icon: "refresh-cw",
       ariaLabel: "\u91CD\u5EFA\u7D22\u5F15",
@@ -2481,14 +3762,33 @@ var LibraryPage = class {
     this.statusWrap = statusbar;
     const filterbar = document.createElement("div");
     filterbar.className = "pd-filterbar";
+    const categoryField = document.createElement("label");
+    categoryField.className = "pd-field";
+    const categoryLabel = document.createElement("span");
+    categoryLabel.className = "pd-label";
+    categoryLabel.textContent = "\u5927\u79D1\u76EE";
+    const categorySelect = document.createElement("select");
+    categorySelect.className = "pd-select";
+    categorySelect.setAttribute("aria-label", "\u5927\u79D1\u76EE\u7B5B\u9009");
+    categorySelect.addEventListener("change", () => {
+      this.categoryFilter = categorySelect.value === "" ? null : categorySelect.value;
+      this.filter.subject = null;
+      this.filter.tags = [];
+      this.syncSubjectOptions();
+      this.renderTagChips();
+      this.renderCards();
+      this.renderTable();
+    });
+    categoryField.append(categoryLabel, categorySelect);
+    this.categorySelect = categorySelect;
     const subjectField = document.createElement("label");
     subjectField.className = "pd-field";
     const subjectLabel = document.createElement("span");
     subjectLabel.className = "pd-label";
-    subjectLabel.textContent = "\u79D1\u76EE";
+    subjectLabel.textContent = "\u5B50\u79D1\u76EE";
     const subjectSelect = document.createElement("select");
     subjectSelect.className = "pd-select";
-    subjectSelect.setAttribute("aria-label", "\u79D1\u76EE\u7B5B\u9009");
+    subjectSelect.setAttribute("aria-label", "\u5B50\u79D1\u76EE\u7B5B\u9009");
     subjectSelect.addEventListener("change", () => {
       this.filter.subject = subjectSelect.value === "" ? null : subjectSelect.value;
       this.renderCards();
@@ -2527,7 +3827,7 @@ var LibraryPage = class {
     tagsGroup.setAttribute("role", "group");
     tagsGroup.setAttribute("aria-label", "\u6807\u7B7E\u7B5B\u9009");
     this.tagsWrap = tagsGroup;
-    filterbar.append(subjectField, sortField, tagsGroup);
+    filterbar.append(categoryField, subjectField, sortField, tagsGroup);
     const clear = createButton(filterbar, {
       label: "\u6E05\u9664\u7B5B\u9009",
       cls: "pd-btn",
@@ -2600,6 +3900,7 @@ var LibraryPage = class {
   refresh() {
     this.syncHeader();
     this.renderStatusChips();
+    this.syncCategoryOptions();
     this.syncSubjectOptions();
     this.renderTagChips();
     this.renderCards();
@@ -2696,27 +3997,60 @@ var LibraryPage = class {
       wrap.appendChild(chip);
     }
   }
-  syncSubjectOptions() {
-    const select = this.subjectSelect;
-    if (!select)
+  syncCategoryOptions() {
+    const select2 = this.categorySelect;
+    if (!select2)
       return;
-    const current = this.filter.subject ?? "";
-    clearElement(select);
+    const current = this.categoryFilter ?? "";
+    clearElement(select2);
     const all = document.createElement("option");
     all.value = "";
-    all.textContent = "\u5168\u90E8\u79D1\u76EE";
-    select.appendChild(all);
-    const subjects = /* @__PURE__ */ new Set();
-    for (const card of this.plugin.getCards())
-      subjects.add(card.subject);
-    for (const subject of Array.from(subjects).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
+    all.textContent = "\u5168\u90E8\u5927\u79D1\u76EE";
+    select2.appendChild(all);
+    for (const category of this.collectCategories()) {
       const option = document.createElement("option");
-      option.value = subject;
-      option.textContent = subject;
-      select.appendChild(option);
+      option.value = category;
+      option.textContent = category;
+      select2.appendChild(option);
     }
-    select.value = current;
-    if (select.value !== current)
+    select2.value = current;
+    if (select2.value !== current)
+      this.categoryFilter = null;
+  }
+  collectCategories() {
+    const set = /* @__PURE__ */ new Set();
+    for (const card of this.plugin.getCards())
+      set.add(card.category ?? "\u6570\u5B66");
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  }
+  syncSubjectOptions() {
+    const select2 = this.subjectSelect;
+    if (!select2)
+      return;
+    const enabled = this.categoryFilter !== null;
+    select2.disabled = !enabled;
+    select2.setAttribute("aria-disabled", String(!enabled));
+    select2.title = enabled ? "" : "\u5148\u9009\u62E9\u5927\u79D1\u76EE";
+    clearElement(select2);
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = enabled ? "\u5168\u90E8\u5B50\u79D1\u76EE" : "\u5148\u9009\u62E9\u5927\u79D1\u76EE";
+    select2.appendChild(all);
+    if (enabled) {
+      const set = /* @__PURE__ */ new Set();
+      for (const card of this.plugin.getCards()) {
+        if (card.category === this.categoryFilter)
+          set.add(card.subject);
+      }
+      for (const subject of Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
+        const option = document.createElement("option");
+        option.value = subject;
+        option.textContent = subject;
+        select2.appendChild(option);
+      }
+    }
+    select2.value = this.filter.subject ?? "";
+    if (!enabled)
       this.filter.subject = null;
   }
   renderTagChips() {
@@ -2724,19 +4058,30 @@ var LibraryPage = class {
     if (!wrap)
       return;
     clearElement(wrap);
+    const enabled = this.categoryFilter !== null;
+    wrap.setAttribute("aria-disabled", String(!enabled));
+    wrap.title = enabled ? "" : "\u5148\u9009\u62E9\u5927\u79D1\u76EE";
     const tags = /* @__PURE__ */ new Set();
-    for (const card of this.plugin.getCards())
-      for (const tag of card.tags)
-        tags.add(tag);
+    if (enabled) {
+      for (const card of this.plugin.getCards()) {
+        if (card.category === this.categoryFilter) {
+          for (const tag of card.tags)
+            tags.add(tag);
+        }
+      }
+    }
     for (const tag of Array.from(tags).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))) {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "pd-chip pd-chip-tag";
       chip.textContent = tag;
-      const active = this.filter.tags.includes(tag);
-      chip.setAttribute("aria-pressed", String(active));
+      chip.disabled = !enabled;
+      const active2 = this.filter.tags.includes(tag);
+      chip.setAttribute("aria-pressed", String(active2));
       chip.addEventListener("click", () => {
-        this.filter.tags = active ? this.filter.tags.filter((item) => item !== tag) : [...this.filter.tags, tag];
+        if (!enabled)
+          return;
+        this.filter.tags = active2 ? this.filter.tags.filter((item) => item !== tag) : [...this.filter.tags, tag];
         this.renderTagChips();
         this.renderCards();
         this.renderTable();
@@ -2748,13 +4093,13 @@ var LibraryPage = class {
     this.filter = emptyFilter();
     this.statusFilter = "all";
     this.sort = "due";
+    this.categoryFilter = null;
     if (this.searchInput)
       this.searchInput.value = "";
-    if (this.subjectSelect)
-      this.subjectSelect.value = "";
     if (this.sortSelect)
       this.sortSelect.value = "due";
     this.renderStatusChips();
+    this.syncCategoryOptions();
     this.syncSubjectOptions();
     this.renderTagChips();
     this.renderCards();
@@ -2763,7 +4108,10 @@ var LibraryPage = class {
   /* ---------------- 数据 ---------------- */
   computeFiltered() {
     const today = this.plugin.today();
-    const cards = this.plugin.getCards().filter((card) => matchesStatus(card, this.plugin.getState(card.qid), this.statusFilter, today));
+    const byCategory = this.categoryFilter ? this.plugin.getCards().filter((card) => card.category === this.categoryFilter) : this.plugin.getCards();
+    const cards = byCategory.filter(
+      (card) => matchesStatus(card, this.plugin.getState(card.qid), this.statusFilter, today)
+    );
     const filtered = filterCards(cards, this.plugin.data, this.filter, today);
     return sortCards(filtered, this.plugin.data, this.sort, today);
   }
@@ -2780,7 +4128,8 @@ var LibraryPage = class {
       return;
     }
     if (cards.length === 0) {
-      this.renderEmpty(grid, "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u9898\u3002", false);
+      const message = this.categoryFilter !== null && this.plugin.getCards().some((card) => card.category === this.categoryFilter) ? "\u8BE5\u5927\u79D1\u76EE\u4E0B\u6682\u65E0\u9898\u76EE" : "\u6CA1\u6709\u7B26\u5408\u6761\u4EF6\u7684\u9898\u3002";
+      this.renderEmpty(grid, message, false);
       return;
     }
     let index = 0;
@@ -2799,65 +4148,110 @@ var LibraryPage = class {
     qcard.className = "pd-qcard" + (isEnter ? " is-enter" : "");
     qcard.dataset.qid = card.qid;
     qcard.setAttribute("role", "listitem");
-    const main = document.createElement("div");
-    main.className = "pd-qcard-main";
-    main.setAttribute("role", "button");
-    main.tabIndex = 0;
+    const open = document.createElement("div");
+    open.className = "pd-qcard-open";
+    open.setAttribute("role", "button");
+    open.tabIndex = 0;
     const preview = toPreviewText(card.stem) || "\uFF08\u7A7A\u9898\u5E72\uFF09";
-    main.setAttribute("aria-label", `\u7EC3\u4E60\uFF1A${preview.slice(0, 30)}`);
+    open.setAttribute("aria-label", `\u7EC3\u4E60\uFF1A${preview.slice(0, 30)}`);
+    const onOpen = () => {
+      void this.plugin.startPractice([card]);
+    };
+    open.addEventListener("click", onOpen);
+    open.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onOpen();
+      }
+    });
     const head = document.createElement("div");
     head.className = "pd-qcard-head";
     head.appendChild(this.buildTags(card));
-    main.appendChild(head);
+    open.appendChild(head);
     const stem = document.createElement("div");
     stem.className = "pd-qcard-stem";
     stem.textContent = preview;
-    main.appendChild(stem);
+    open.appendChild(stem);
     const foot = document.createElement("div");
     foot.className = "pd-qcard-foot";
     const badge = statusLabel(libStatus(card, state, today));
     const chip = document.createElement("span");
     chip.className = `pd-status ${badge.cls}`;
     chip.textContent = badge.text;
+    const dueText = dueLine(state, today);
     const due = document.createElement("span");
     due.className = "pd-qcard-due";
-    due.textContent = dueLine(state, today);
+    due.textContent = dueText;
     const source = document.createElement("span");
     source.className = "pd-qcard-source";
     source.textContent = card.source ? `\u51FA\u5904\uFF1A${card.source}` : card.pdf ? "PDF" : "";
-    foot.append(chip, due, source);
-    main.appendChild(foot);
-    main.addEventListener("click", () => {
-      void this.plugin.startPractice([card]);
-    });
-    main.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        void this.plugin.startPractice([card]);
-      }
-    });
+    foot.append(chip);
+    if (dueText)
+      foot.appendChild(due);
+    foot.appendChild(source);
+    open.appendChild(foot);
     const tools = document.createElement("div");
     tools.className = "pd-qcard-tools";
-    const detail = document.createElement("button");
-    detail.type = "button";
-    detail.className = "pd-qcard-detail";
-    detail.textContent = "\u67E5\u770B\u8BE6\u60C5";
-    detail.addEventListener("click", (event) => {
+    const tagBtn = document.createElement("button");
+    tagBtn.type = "button";
+    tagBtn.className = "pd-icon-btn pd-tag-btn";
+    tagBtn.setAttribute("aria-label", "\u7F16\u8F91\u6807\u7B7E");
+    tagBtn.setAttribute("aria-haspopup", "dialog");
+    tagBtn.setAttribute("aria-expanded", "false");
+    (0, import_obsidian9.setIcon)(tagBtn, "tags");
+    tagBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      void this.plugin.openSource(card);
+      openTagPopover(tagBtn, this.plugin, card);
+    });
+    const starred = state?.star ?? card.starInitial;
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = "pd-icon-btn pd-star" + (starred ? " is-active" : "");
+    star.setAttribute("aria-label", starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF");
+    star.setAttribute("aria-pressed", String(starred));
+    (0, import_obsidian9.setIcon)(star, "star");
+    star.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const next = this.plugin.toggleStar(card.qid);
+      star.classList.toggle("is-active", next);
+      star.setAttribute("aria-pressed", String(next));
+      star.setAttribute("aria-label", next ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF");
+      this.plugin.requestSave();
+      if (next)
+        playStarClick();
+      this.renderStatusChips();
+      this.renderCards();
+      this.renderTable();
     });
     const more = document.createElement("button");
     more.type = "button";
-    more.className = "pd-icon-btn";
+    more.className = "pd-icon-btn pd-more-btn";
     more.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
     more.setAttribute("aria-haspopup", "menu");
-    (0, import_obsidian7.setIcon)(more, "more-horizontal");
+    (0, import_obsidian9.setIcon)(more, "more-horizontal");
     more.addEventListener("click", (event) => {
       event.stopPropagation();
       this.openCardMenu(more, card);
     });
-    tools.append(detail, more);
-    qcard.append(main, tools);
+    tools.append(tagBtn, star, more);
+    const foldWrap = document.createElement("div");
+    foldWrap.className = "pd-qcard-fold";
+    const openState = state?.foldOpen ?? true;
+    const answerText = toPreviewText(card.answer, 220) || "\uFF08\u65E0\u7B54\u6848\uFF09";
+    const noteLines = card.notes.split(/\r?\n/).filter((line) => line.trim() !== "").length;
+    createCollapsible(foldWrap, "\u7B54\u6848\u4E0E\u7B14\u8BB0", {
+      count: noteLines > 0 ? `\u7B54\u6848 \xB7 \u7B14\u8BB0 ${noteLines} \u884C` : "\u7B54\u6848",
+      startsOpen: openState,
+      onToggle: (openFlag) => this.plugin.setFoldOpen(card.qid, openFlag),
+      onFirstOpen: (content) => {
+        const answer = document.createElement("div");
+        answer.className = "pd-qcard-answer";
+        answer.textContent = answerText;
+        content.appendChild(answer);
+        content.appendChild(createNoteEditor(this.plugin, card, content, { compact: true }));
+      }
+    });
+    qcard.append(open, tools, foldWrap);
     return qcard;
   }
   /* ---------------- 紧凑表格 ---------------- */
@@ -2891,20 +4285,22 @@ var LibraryPage = class {
   buildRow(card, today) {
     const state = this.plugin.getState(card.qid);
     const starred = state?.star ?? card.starInitial;
-    const row = document.createElement("div");
-    row.className = "pd-trow";
-    row.setAttribute("role", "listitem");
+    const row2 = document.createElement("div");
+    row2.className = "pd-trow";
+    row2.setAttribute("role", "listitem");
     const star = document.createElement("button");
     star.type = "button";
     star.className = "pd-icon-btn pd-star" + (starred ? " is-active" : "");
     star.setAttribute("aria-label", starred ? "\u53D6\u6D88\u6536\u85CF" : "\u6536\u85CF");
     star.setAttribute("aria-pressed", String(starred));
-    (0, import_obsidian7.setIcon)(star, "star");
+    (0, import_obsidian9.setIcon)(star, "star");
     star.addEventListener("click", () => {
       const next = this.plugin.toggleStar(card.qid);
       star.classList.toggle("is-active", next);
       star.setAttribute("aria-pressed", String(next));
       this.plugin.requestSave();
+      if (next)
+        playStarClick();
       this.renderStatusChips();
       this.renderCards();
       this.renderTable();
@@ -2921,7 +4317,7 @@ var LibraryPage = class {
     });
     const subject = document.createElement("span");
     subject.className = "pd-trow-meta";
-    subject.textContent = card.subject;
+    subject.textContent = `${card.category ?? "\u6570\u5B66"} \xB7 ${card.subject}`;
     const tags = document.createElement("span");
     tags.className = "pd-trow-meta";
     tags.textContent = card.tags.slice(0, 2).join(" \xB7 ");
@@ -2936,13 +4332,13 @@ var LibraryPage = class {
     more.type = "button";
     more.className = "pd-icon-btn";
     more.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
-    (0, import_obsidian7.setIcon)(more, "more-horizontal");
+    (0, import_obsidian9.setIcon)(more, "more-horizontal");
     more.addEventListener("click", (event) => {
       event.stopPropagation();
       this.openCardMenu(more, card);
     });
-    row.append(star, main, subject, tags, status, due, more);
-    return row;
+    row2.append(star, main, subject, tags, status, due, more);
+    return row2;
   }
   /* ---------------- 菜单 / 标签 / 空态 ---------------- */
   openCardMenu(anchor, card) {
@@ -2957,6 +4353,13 @@ var LibraryPage = class {
           this.renderStatusChips();
           this.renderCards();
           this.renderTable();
+        }
+      },
+      {
+        label: "\u7F16\u8F91\u6807\u7B7E",
+        icon: "tags",
+        onSelect: () => {
+          openTagPopover(anchor, this.plugin, card);
         }
       },
       {
@@ -2978,11 +4381,15 @@ var LibraryPage = class {
   buildTags(card) {
     const tags = document.createElement("div");
     tags.className = "pd-tags";
+    const category = document.createElement("span");
+    category.className = "pd-tag is-category";
+    category.textContent = card.category || "\u6570\u5B66";
+    tags.appendChild(category);
     const subject = document.createElement("span");
     subject.className = "pd-tag is-subject";
     subject.textContent = card.subject || "\u672A\u5206\u7C7B";
     tags.appendChild(subject);
-    const topics = card.tags.slice(0, 3);
+    const topics = card.tags.slice(0, 2);
     for (const tag of topics) {
       const chip = document.createElement("span");
       chip.className = "pd-tag is-topic";
@@ -3046,7 +4453,7 @@ var LibraryPage = class {
 
 // src/view/workbenchView.ts
 var VIEW_TYPE_ZAPTRACE = "zaptrace-workbench";
-var ZaptraceView = class extends import_obsidian8.ItemView {
+var ZaptraceView = class extends import_obsidian10.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.drawer = null;
@@ -3091,7 +4498,7 @@ var ZaptraceView = class extends import_obsidian8.ItemView {
     closeBtn.type = "button";
     closeBtn.className = "pd-icon-btn";
     closeBtn.setAttribute("aria-label", "\u5173\u95ED\u7EC3\u4E60");
-    (0, import_obsidian8.setIcon)(closeBtn, "x");
+    (0, import_obsidian10.setIcon)(closeBtn, "x");
     closeBtn.addEventListener("click", () => this.closeDrawer());
     drawerHead.append(drawerTitle, closeBtn);
     const drawerBody = document.createElement("div");
@@ -3136,6 +4543,7 @@ var ZaptraceView = class extends import_obsidian8.ItemView {
   }
   async onClose() {
     closeAllMenus();
+    closeTagPopover();
     this.unregister?.();
     this.unregister = null;
     clearElement(this.contentEl);
@@ -3203,7 +4611,7 @@ var ZaptraceView = class extends import_obsidian8.ItemView {
 };
 
 // src/main.ts
-var ZapTracePlugin = class extends import_obsidian9.Plugin {
+var ZapTracePlugin = class extends import_obsidian11.Plugin {
   constructor() {
     super(...arguments);
     this.index = emptyIndex();
@@ -3226,7 +4634,7 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
     const result = await this.store.load();
     this.settings = this.store.data.settings;
     for (const issue of result.issues) {
-      new import_obsidian9.Notice(`ZapTrace: ${issue}`, 8e3);
+      new import_obsidian11.Notice(`ZapTrace: ${issue}`, 8e3);
     }
     this.registerView(VIEW_TYPE_ZAPTRACE, (leaf) => new ZaptraceView(leaf, this));
     this.applyTheme();
@@ -3243,8 +4651,8 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
     this.addCommand({
       id: "practice-current-card",
       name: "\u7EC3\u4E60\u5F53\u524D\u9898\u5361",
-      editorCallback: (editor, ctx) => {
-        this.practiceCurrentCard(editor, ctx.file ?? null);
+      editorCallback: (editor, ctx2) => {
+        this.practiceCurrentCard(editor, ctx2.file ?? null);
       }
     });
     this.addCommand({
@@ -3270,8 +4678,8 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
       }
     });
     this.addSettingTab(new ZaptraceSettingsTab(this.app, this));
-    this.registerMarkdownCodeBlockProcessor("zaptrace", (source, el, ctx) => {
-      this.renderCodeBlock(source, el, ctx);
+    this.registerMarkdownCodeBlockProcessor("zaptrace", (source, el, ctx2) => {
+      this.renderCodeBlock(source, el, ctx2);
     });
     this.app.workspace.onLayoutReady(() => {
       void this.rebuildIndex();
@@ -3289,6 +4697,7 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
       this.rebuildTimer = null;
     }
     void this.store.flush();
+    closeStarSound();
     document.body.classList.remove("zaptrace-force-dark");
     document.body.classList.remove("zaptrace-mubu-dark");
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_ZAPTRACE);
@@ -3327,6 +4736,102 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
   requestSave() {
     this.store.markDirty();
   }
+  isReadOnly() {
+    return this.store.readOnly;
+  }
+  /** 目标文件修改时间（epoch ms），用于「从未在插件保存过」的笔记时间回退。 */
+  getFileMtime(path) {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof import_obsidian11.TFile))
+      return null;
+    const mtime = file.stat?.mtime;
+    return typeof mtime === "number" ? mtime : null;
+  }
+  /** 持久化「答案与笔记」折叠开合（按 qid） */
+  setFoldOpen(qid, open) {
+    const state = this.data.questions[qid];
+    if (!state)
+      return;
+    state.foldOpen = open;
+    this.requestSave();
+  }
+  /**
+   * 保存个人笔记：重新读取最新文件 → 重新定位块 → 只替换「### 个人笔记」节。
+   * 绝不改答案/题干/其它块；失败不写盘。
+   */
+  async saveNotes(card, notes) {
+    if (this.store.readOnly)
+      return { ok: false, error: "\u53EA\u8BFB\u6A21\u5F0F" };
+    const file = this.app.vault.getAbstractFileByPath(card.file);
+    if (!(file instanceof import_obsidian11.TFile))
+      return { ok: false, error: "\u627E\u4E0D\u5230\u6E90\u6587\u4EF6" };
+    const fresh = await this.app.vault.read(file);
+    const scanned = scanZaptraceBlocks(card.file, fresh).cards;
+    let candidates = scanned.filter((item) => item.qid === card.qid);
+    if (candidates.length === 0)
+      candidates = scanned.filter((item) => item.line === card.line);
+    if (candidates.length === 0) {
+      return { ok: false, error: "\u9898\u5361\u5DF2\u79FB\u52A8\u6216\u5220\u9664\uFF0C\u8BF7\u5237\u65B0\u7D22\u5F15" };
+    }
+    const target = candidates.reduce(
+      (a, b) => Math.abs(a.line - card.line) <= Math.abs(b.line - card.line) ? a : b
+    );
+    const patched = replacePersonalNotes(
+      fresh,
+      { line: target.line, endLine: target.endLine },
+      notes
+    );
+    if (patched.error) {
+      const message = patched.error === "reserved_heading_in_notes" ? "\u7B14\u8BB0\u4E0D\u80FD\u5305\u542B\u300C### \u9898\u5E72 / \u7B54\u6848 / \u4E2A\u4EBA\u7B14\u8BB0 / AI \u7B14\u8BB0\u300D\u7B49\u4FDD\u7559\u6807\u9898" : patched.error === "not_zaptrace" ? "\u76EE\u6807\u5757\u4E0D\u662F zaptrace \u9898\u5361" : "\u9898\u5361\u4F4D\u7F6E\u65E0\u6548\uFF0C\u8BF7\u5237\u65B0\u7D22\u5F15\u540E\u91CD\u8BD5";
+      return { ok: false, error: message };
+    }
+    if (patched.changed) {
+      await this.app.vault.process(file, () => patched.content);
+      const now = this.nowIso();
+      const state = ensureQuestionFromCard(this.data, target, now);
+      state.notesUpdatedAt = notes.trim() === "" ? null : now;
+      this.requestSave();
+      await this.rebuildIndex();
+    }
+    this.refreshAll();
+    return { ok: true, changed: patched.changed };
+  }
+  /**
+   * 保存分类与标签：重新读取最新文件 → 重新定位块 → 只改头部
+   * category/subject/tags 三行；失败不写盘。
+   */
+  async saveMetadata(card, next) {
+    if (this.store.readOnly)
+      return { ok: false, error: "\u53EA\u8BFB\u6A21\u5F0F" };
+    const file = this.app.vault.getAbstractFileByPath(card.file);
+    if (!(file instanceof import_obsidian11.TFile))
+      return { ok: false, error: "\u627E\u4E0D\u5230\u6E90\u6587\u4EF6" };
+    const fresh = await this.app.vault.read(file);
+    const scanned = scanZaptraceBlocks(card.file, fresh).cards;
+    let candidates = scanned.filter((item) => item.qid === card.qid || item.key === card.key);
+    if (candidates.length === 0)
+      candidates = scanned.filter((item) => item.line === card.line);
+    if (candidates.length === 0) {
+      return { ok: false, error: "\u9898\u5361\u5DF2\u79FB\u52A8\u6216\u5220\u9664\uFF0C\u8BF7\u5237\u65B0\u7D22\u5F15" };
+    }
+    const target = candidates.reduce(
+      (a, b) => Math.abs(a.line - card.line) <= Math.abs(b.line - card.line) ? a : b
+    );
+    const patched = patchCardMetadata(fresh, { line: target.line, endLine: target.endLine }, next);
+    if (patched.error) {
+      return {
+        ok: false,
+        error: patched.error === "not_zaptrace" ? "\u76EE\u6807\u5757\u4E0D\u662F zaptrace \u9898\u5361" : "\u9898\u5361\u4F4D\u7F6E\u65E0\u6548\uFF0C\u8BF7\u5237\u65B0\u7D22\u5F15\u540E\u91CD\u8BD5"
+      };
+    }
+    if (!patched.changed)
+      return { ok: true, changed: false };
+    await this.app.vault.process(file, () => patched.content);
+    await this.rebuildIndex();
+    this.refreshAll();
+    this.refreshReadingViews();
+    return { ok: true, changed: true };
+  }
   refreshAll() {
     this.workbench?.refreshAll();
   }
@@ -3350,15 +4855,15 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
    */
   async openSource(card) {
     const file = this.app.vault.getAbstractFileByPath(card.file);
-    if (!(file instanceof import_obsidian9.TFile)) {
-      new import_obsidian9.Notice(`ZapTrace: \u627E\u4E0D\u5230\u6E90\u6587\u4EF6 ${card.file}`);
+    if (!(file instanceof import_obsidian11.TFile)) {
+      new import_obsidian11.Notice(`ZapTrace: \u627E\u4E0D\u5230\u6E90\u6587\u4EF6 ${card.file}`);
       return;
     }
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.openFile(file, { eState: { line: card.line - 1 } });
     await this.app.workspace.revealLeaf(leaf);
     const view = leaf.view;
-    if (view instanceof import_obsidian9.MarkdownView) {
+    if (view instanceof import_obsidian11.MarkdownView) {
       view.setEphemeralState({ line: card.line - 1 });
       if (view.getMode() === "source") {
         view.editor.setCursor({ line: card.line - 1, ch: 0 });
@@ -3384,6 +4889,19 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
       "zaptrace-force-dark",
       this.settings.theme === "mubu-dark"
     );
+  }
+  /** 重渲染当前打开的阅读视图，让题卡头部/笔记的修改立刻可见。 */
+  refreshReadingViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian11.MarkdownView && view.getMode() === "preview") {
+        try {
+          view.previewMode.rerender(true);
+        } catch (error) {
+          console.error("[ZapTrace] \u91CD\u6E32\u67D3\u9605\u8BFB\u89C6\u56FE\u5931\u8D25", error);
+        }
+      }
+    }
   }
   async updateSettings(patch) {
     await this.saveSettings({ ...this.settings, ...patch });
@@ -3428,13 +4946,40 @@ var ZapTracePlugin = class extends import_obsidian9.Plugin {
         cardFolder: this.settings.cardFolder
       });
       this.syncStates();
+      await this.maybeSeedTaxonomy();
       this.refreshAll();
     } catch (error) {
       console.error("[ZapTrace] \u91CD\u5EFA\u7D22\u5F15\u5931\u8D25", error);
-      new import_obsidian9.Notice("ZapTrace: \u91CD\u5EFA\u7D22\u5F15\u5931\u8D25\uFF0C\u8BE6\u89C1\u63A7\u5236\u53F0");
+      new import_obsidian11.Notice("ZapTrace: \u91CD\u5EFA\u7D22\u5F15\u5931\u8D25\uFF0C\u8BE6\u89C1\u63A7\u5236\u53F0");
     } finally {
       this.rebuilding = false;
     }
+  }
+  /** 首次有题卡且未配置分类时，从题卡一次性播种 taxonomy（只读跳过）。 */
+  async maybeSeedTaxonomy() {
+    if (this.store.readOnly)
+      return;
+    const taxonomy = this.settings.taxonomy;
+    if (taxonomy.seeded || taxonomy.categories.length > 0)
+      return;
+    if (this.index.cards.length === 0)
+      return;
+    const map = /* @__PURE__ */ new Map();
+    for (const card of this.index.cards) {
+      const category = card.category || "\u6570\u5B66";
+      const subjects = map.get(category) ?? /* @__PURE__ */ new Set();
+      if (card.subject)
+        subjects.add(card.subject);
+      map.set(category, subjects);
+    }
+    const categories = [...map.entries()].map(([name, subjects]) => ({
+      name,
+      subjects: [...subjects].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+    }));
+    await this.saveSettings({
+      ...this.settings,
+      taxonomy: { categories, seeded: true }
+    });
   }
   scheduleRebuild() {
     if (this.rebuildTimer !== null)
@@ -3470,9 +5015,9 @@ ${orphanAfter}`;
     }
   }
   /* ---------------- 渲染 ---------------- */
-  renderCodeBlock(source, el, ctx) {
-    const filePath = ctx.sourcePath;
-    const info = ctx.getSectionInfo(el);
+  renderCodeBlock(source, el, ctx2) {
+    const filePath = ctx2.sourcePath;
+    const info = ctx2.getSectionInfo(el);
     const startLine = info ? info.lineStart + 1 : 1;
     const endLine = info ? info.lineEnd + 1 : startLine;
     let card = this.findCardByLocation(filePath, startLine);
@@ -3489,7 +5034,7 @@ ${orphanAfter}`;
     if (!card)
       return;
     const owner = new RenderScope(el);
-    ctx.addChild(owner);
+    ctx2.addChild(owner);
     const inSourceView = Boolean(el.closest(".markdown-source-view"));
     if (inSourceView) {
       if (this.settings.livePreview === "source")
@@ -3509,7 +5054,7 @@ ${orphanAfter}`;
       (card) => cursorLine >= card.line && cursorLine <= card.endLine
     );
     if (!located) {
-      new import_obsidian9.Notice("ZapTrace: \u5149\u6807\u4E0D\u5728 zaptrace \u9898\u5361\u5185");
+      new import_obsidian11.Notice("ZapTrace: \u5149\u6807\u4E0D\u5728 zaptrace \u9898\u5361\u5185");
       return;
     }
     const indexed = this.index.cards.find(
@@ -3520,7 +5065,7 @@ ${orphanAfter}`;
   randomPractice() {
     const cards = this.index.cards;
     if (cards.length === 0) {
-      new import_obsidian9.Notice("ZapTrace: \u8FD8\u6CA1\u6709\u53EF\u7EC3\u4E60\u7684\u9898\u5361");
+      new import_obsidian11.Notice("ZapTrace: \u8FD8\u6CA1\u6709\u53EF\u7EC3\u4E60\u7684\u9898\u5361");
       return;
     }
     const random = cards[Math.floor(Math.random() * cards.length)];

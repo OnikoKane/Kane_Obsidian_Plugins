@@ -451,6 +451,7 @@ function makeCard(qid: string, stem: string, tags: string[], subject: string): Q
 		qid,
 		explicitId: qid,
 		duplicateId: false,
+		category: "数学",
 		subject,
 		tags,
 		source: "",
