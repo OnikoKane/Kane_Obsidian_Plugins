@@ -1,0 +1,10 @@
+{
+  "id": "zaptrace",
+  "name": "ZapTrace",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "数学刷题与间隔复习：把笔记里的 ```zaptrace 题卡变成可作答、可四档评分、可排期的题目，状态只保存在本地 data.json，绝不改写原文。",
+  "author": "ZCode",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

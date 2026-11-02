@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | [`AnnotationMarker_zcode/`](AnnotationMarker_zcode/) | Annotation Marker（ZCode 版） | 给笔记加高亮 / 批注 / 注音，标注写在插件目录的影子副本里，不改正文 |
 | [`MubuStyle/`](MubuStyle/) | MubuStyle | 把笔记外观换成幕布（Mubu）风：字体 / 纸张式背景 / 实心圆点 / 缩进参考线 / 悬浮格式栏 |
+| [`ZapTrace/`](ZapTrace/) | ZapTrace | 数学 Markdown 题卡、折叠答案与笔记、收藏题集，以及四档评分驱动的本地间隔复习 |
 
 ## 使用方式
 
